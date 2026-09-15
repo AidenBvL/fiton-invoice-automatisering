@@ -1,5 +1,93 @@
 # Wat er veranderd is
 
+## 9.21.0
+
+**Facturen die verkeerd gelezen werden.** Allemaal gevonden op echte facturen,
+en na elke wijziging zijn alle facturen die we bij de hand hadden opnieuw door
+de oude en de nieuwe versie gehaald om te zien dat er niets anders meeschoof.
+
+*MSC.* Een factuur van € 600 kwam binnen als € 1.800: hetzelfde bedrag drie
+keer geteld. MSC zet een label en zijn bedrag op één regel, maar met de
+basislijnen een halve punt uit elkaar, en regels worden op die basislijn
+gegroepeerd — het label belandde in een regel zonder bedrag en het bedrag in een
+regel zonder label, waar het als kostenregel werd gelezen. Staat er nu een
+totaal-label naast een bedrag op dezelfde regel, dan is dat bedrag van dat label.
+En een regel die een btw-percentage noemt is de btw-specificatie, nooit een
+kostenregel.
+
+*Containers en zendingen.* Het containernummer kwam als `SZ LU 9491905` uit de
+PDF — de lettercode komt in stukjes uit de tekstlaag — en werd zo helemaal niet
+als container herkend, dus er werd niets opgezocht. De letters mogen nu uit
+elkaar staan. Daarnaast werd alleen de éérste containerkandidaat op de pagina
+getest: een factuurnummer als `NLIC0129529` is óók vier letters en zeven cijfers,
+en daar hield het zoeken op, waarna een heel blok kosten geen zending had om bij
+te horen. Alle kandidaten worden nu getest.
+
+*Wat een shipmentnummer is.* Een kostenregel wordt altijd op een zending met
+1002, 2002 of 3002 geboekt. Dat is nu ook wat geaccepteerd wordt. Daarvóór gold
+"100 gevolgd door van alles", waardoor het klantnummer van MSC — dat op élke
+factuur van ze staat — voor een shipment id werd aangezien en al hun facturen
+onder een nummer werden gezocht dat FitOn niet heeft.
+
+*Zoeken.* In Forwarding > Search wordt gezocht op containernummer of B/L, dus
+die twee komen eerst; de rest is wat overblijft als een factuur geen van beide
+noemt.
+
+*Aantal × stuksprijs.* Een MSC-opslagregel leest "from 18/08/2026 to 27/08/2026",
+en 18 × 27 is precies € 486,00 — het bedrag van de regel. Die werd dus geboekt
+als 18 stuks à € 27,00. Datums tellen niet meer mee als aantal of prijs. Echte
+aantallen blijven staan: 5 × € 320,00 op een Maersk-regel, 24 pallets × € 18,63
+op Lineage, 7 dagen × € 42,00 op een regel die z'n datumbereik ernaast draagt.
+
+*Een boeking van € 0,00.* Een zending kan zonder kostenregels overblijven — als
+z'n enige regel het factuurtotaal blijkt te zijn, of een herhaling van iets dat
+al geteld was. Wat overbleef was een container zonder regels, en die werd alsnog
+geboekt. Zo'n zending gaat er nu uit.
+
+*Een halve factuur overgeslagen als dubbele van zichzelf.* Twee blokken voor
+dezelfde container werden apart gehouden tenzij hun referenties exact gelijk
+waren. Een blok dat géén referentie noemt werd daardoor een eigen zending, apart
+geboekt, waarna de tweede helft werd geweigerd omdat het factuurnummer inmiddels
+op de zending stond. Een blok zonder referentie splitst een container niet meer;
+twee verschillende referenties nog steeds wel.
+
+*OOCL.* Een factuur van € 60,00 kwam binnen als € 180,00. Erachter zit een
+Reefer Power and Monitoring Notice die datzelfde bedrag vier keer herhaalt.
+Regels onthouden nu van welk vel ze komen: kloppen de kosten samen met geen
+enkel totaal uit het document, maar kloppen de kosten van één vel wél met een
+totaal op dat vel, dan is dat vel de factuur en is de rest bijlage. Dat gebeurt
+alleen bij een document dat toch al niet klopte.
+
+*ONE.* Boekte z'n terminal security als "DISCHARGE", op Diversen. ONE zet de
+omschrijving náást de bedragen met de basislijnen een halve punt uit elkaar, en
+de regel erbóven is de doorgelopen omschrijving van de vórige kostenregel — er
+werd alleen omhoog gekeken. Tekst op dezelfde basislijn wint nu.
+
+*Grootboeken.* Een rij kolomkoppen is geen kostensoort meer (`CHARGE DESCRIPTION
+BASIS RATE CUR VAT%` wees een grootboek aan puur door het woord VAT erin).
+Noemt een regel zelf geen kostensoort, dan wordt het dichtstbijzijnde kopje
+erboven dat dat wél doet ervoor gezet — zo boekt MSC "Plug In" op 4955 Special
+Equipment en "Storage" op 4933 Storage Charges, in plaats van allebei op
+Trucking Costs. OOCL's `RF PWR AND MONITOR CHRG` is hetzelfde als MSC's
+"Plug In" en gaat mee naar 4955; daardoor verhuist ook CMA CGM's "Terminal
+Reefer Monitoring at destination" van Diversen naar 4955.
+
+**Het shipmentnummer in het eindrapport.** Per zending staat er nu bij op welk
+dossier de kosten terecht zijn gekomen, gelezen van de zendingspagina zelf
+(`P606_BOOKING_NO_DISPLAY` voor zee en lucht, `P3701_BOOKING_NO_DISPLAY` voor
+weg) — de factuur noemt dat nummer nooit. Het staat in de rapporttabel, in
+"Rapport kopiëren" en in het dashboard, waar het de referentie van de factuur
+vervangt.
+
+**Versiecontrole.** Een mislukte controle meldde zichzelf als "geen bron
+ingesteld" en liet de foutmelding die het verklaarde ongebruikt; de
+instellingenpagina zei daarnaast "je hebt de nieuwste versie" in het groen
+naast de rode melding dat de controle mislukt was. Verder worden de
+releasenotities en de link nu ontdaan van opmaak voordat ze getoond worden, kan
+één vertypte regel in `releases` de controle niet meer voor de hele afdeling
+breken, en zegt `fiton.version()` eindelijk ook óf je de nieuwste versie draait
+in plaats van alleen welke je hebt.
+
 ## 9.20.0
 
 **Meerdere facturen tegelijk inlezen.** Sleep zoveel PDF's op de scanner als je

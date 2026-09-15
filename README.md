@@ -79,7 +79,7 @@ Auto-updates work with no IT involvement and no signing keys to protect.
 Unlisted means it does not appear in search — only people with the link can install.
 
 1. One-off developer registration (a small fee applies)
-2. `./build.sh` → upload `fiton-invoice-8.0.0.zip`
+2. `./build.sh` → upload the `fiton-invoice-<version>.zip` it writes
 3. Set visibility to **Unlisted**, submit for review (usually a few days)
 4. Share the link; Chrome updates everyone automatically when you publish a new version
 
@@ -122,7 +122,7 @@ a version by putting one row in `releases`:
 
 ```sql
 insert into public.releases (version, notes, url)
-values ('9.20.0', 'Meerdere facturen tegelijk inlezen', 'https://…');
+values ('9.21.0', 'MSC, OOCL en ONE worden goed gelezen', 'https://…');
 ```
 
 With no row there, the newest version is derived from the reports themselves —
@@ -131,7 +131,7 @@ runs have carried it. So even without anyone maintaining that table, a colleague
 who is behind finds out the first time someone else books on a newer one.
 
 Not on Supabase? Settings takes the HTTPS URL of a JSON file instead:
-`{"version": "9.20.0", "notes": "wat er nieuw is", "url": "https://…"}`.
+`{"version": "9.21.0", "notes": "wat er nieuw is", "url": "https://…"}`.
 
 ---
 

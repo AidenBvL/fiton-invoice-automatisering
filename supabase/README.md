@@ -44,7 +44,7 @@ Editor → releases*):
 
 ```sql
 insert into public.releases (version, notes, url)
-values ('9.20.0', 'Meerdere facturen tegelijk inlezen', 'https://…');
+values ('9.21.0', 'MSC, OOCL en ONE worden goed gelezen', 'https://…');
 ```
 
 De `url` mag leeg blijven; dan staat er alleen dát er een nieuwe versie is.
