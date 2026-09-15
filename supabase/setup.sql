@@ -4,9 +4,10 @@
 -- wat al bestaat blijft staan.
 --
 -- Toegang: iedereen met de Project URL en de publishable/anon key mag rapporten
--- toevoegen en lezen, en facturen uploaden en bekijken. Niemand kan via die key
--- iets wijzigen of verwijderen; dat doe je zelf in Supabase (Table Editor en
--- Storage).
+-- toevoegen en lezen, facturen uploaden en bekijken, en opvragen welke versie
+-- de nieuwste is. Niemand kan via die key iets wijzigen of verwijderen, en een
+-- versie aankondigen kan er ook niet mee; dat doe je zelf in Supabase (Table
+-- Editor en Storage).
 
 
 -- 1. De rapporten ------------------------------------------------------------
@@ -102,3 +103,65 @@ create policy "afdeling mag facturen uploaden" on storage.objects
   for insert to anon, authenticated with check (bucket_id = 'facturen');
 create policy "afdeling mag facturen lezen" on storage.objects
   for select to anon, authenticated using (bucket_id = 'facturen');
+
+
+-- 4. Welke versie de nieuwste is ---------------------------------------------
+--
+-- Zodat collega's zien dat ze achterlopen. Bij het uitbrengen van een versie
+-- zet je hem hier neer (SQL Editor, of Table Editor → releases):
+--
+--     insert into public.releases (version, notes, url)
+--     values ('9.20.0', 'Meerdere facturen tegelijk inlezen', 'https://…');
+--
+-- Staat er niets, dan wordt de nieuwste versie afgeleid uit de rapporten: elke
+-- boekrun vertelt op welke versie hij draaide. Een versie telt pas mee na twee
+-- runs, zodat een proefbuild van één iemand niet de hele afdeling aanzet tot
+-- bijwerken.
+
+create table if not exists public.releases (
+  version     text primary key,
+  released_at timestamptz not null default now(),
+  notes       text,
+  url         text
+);
+
+alter table public.releases enable row level security;
+grant select on public.releases to anon, authenticated;
+
+drop policy if exists "afdeling mag versies lezen" on public.releases;
+create policy "afdeling mag versies lezen" on public.releases for select to anon, authenticated using (true);
+
+create or replace function public.fiton_latest_version()
+returns json
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  with published as (
+    select version, notes, url, 'released'::text as source
+    from public.releases
+    where version ~ '^[0-9]+(\.[0-9]+)*$'
+    -- als tekst gesorteerd komt 9.9.0 ná 9.20.0; als lijst van getallen niet
+    order by string_to_array(version, '.')::int[] desc
+    limit 1
+  ),
+  seen as (
+    select detail->>'version' as version,
+           null::text as notes, null::text as url, 'gebruik'::text as source
+    from public.runs
+    where received_at >= now() - interval '30 days'
+      and coalesce(detail->>'version', '') ~ '^[0-9]+(\.[0-9]+)*$'
+    group by detail->>'version'
+    having count(*) >= 2
+    order by string_to_array(detail->>'version', '.')::int[] desc
+    limit 1
+  )
+  select coalesce(
+    (select row_to_json(p) from published p),
+    (select row_to_json(s) from seen s),
+    json_build_object('version', null, 'source', 'onbekend')
+  );
+$$;
+
+grant execute on function public.fiton_latest_version() to anon, authenticated;

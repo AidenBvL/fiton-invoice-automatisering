@@ -32,7 +32,36 @@ Extensie (elke pc) ──► Supabase: tabel runs + opslag facturen ◄── Da
 
 Het dashboard open je via het icoon van de extensie → **Dashboard openen**.
 
-## 3. Goed om te weten
+## 3. Een nieuwe versie aankondigen
+
+Collega's zien vanzelf dat ze achterlopen — de extensie vraagt het elke zes uur
+aan dit project en laat het zien in de popup, de instellingen en het paneel in
+FitOn. Er wordt niets gedownload of geïnstalleerd; het zegt alleen dat je
+achterloopt.
+
+Breng je een versie uit, zet hem dan hier neer (**SQL Editor**, of *Table
+Editor → releases*):
+
+```sql
+insert into public.releases (version, notes, url)
+values ('9.20.0', 'Meerdere facturen tegelijk inlezen', 'https://…');
+```
+
+De `url` mag leeg blijven; dan staat er alleen dát er een nieuwe versie is.
+
+Doe je dit niet, dan wordt de nieuwste versie afgeleid uit de rapporten: elke
+boekrun vertelt op welke versie hij draaide, en een versie telt mee zodra er
+twee runs mee gedaan zijn. Zo merkt iemand die achterloopt het alsnog, de eerste
+keer dat een ander op een nieuwere versie boekt.
+
+Een bestaand project moet `setup.sql` één keer opnieuw draaien voor de tabel
+`releases` en de functie `fiton_latest_version`. Zolang dat niet gebeurd is,
+meldt **Verbinding testen** dat onderdeel als niet gevonden en blijft de rest
+gewoon werken.
+
+---
+
+## 4. Goed om te weten
 
 - **Wie de URL en de key heeft, kan alles lezen**, ook de facturen. Deel ze
   alleen binnen de afdeling. Wijzigen of verwijderen kan via die key niet.

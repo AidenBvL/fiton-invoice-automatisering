@@ -125,6 +125,24 @@
     return res.json();
   }
 
+  /* Which version the department should be on. setup.sql answers from the
+     releases table, or failing that from the version the reports themselves
+     carry. A project that has not had setup.sql re-run yet does not have the
+     function, and says so rather than breaking the check. */
+  async function latestVersion(cfgIn) {
+    const cfg = clean(cfgIn);
+    const res = await call(cfg, '/rest/v1/rpc/fiton_latest_version', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+    });
+    const body = await res.json();
+    return {
+      version: body && body.version ? String(body.version) : '',
+      notes: (body && body.notes) || '',
+      url: (body && body.url) || '',
+      source: (body && body.source) || ''
+    };
+  }
+
   async function downloadDocument(cfgIn, path) {
     const cfg = clean(cfgIn);
     const res = await call(cfg, `/storage/v1/object/authenticated/${BUCKET}/${encodePath(path)}`);
@@ -141,7 +159,8 @@
       ['Kengetallen (fiton_stats)', () => stats(cfg)],
       ['Facturen (opslag facturen)', () => call(cfg, `/storage/v1/object/list/${BUCKET}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: '', limit: 1 })
-      })]
+      })],
+      ['Versiecontrole (fiton_latest_version)', () => latestVersion(cfg)]
     ];
     const results = [];
     for (const [label, run] of steps) {
@@ -151,5 +170,5 @@
     return results;
   }
 
-  root.FitonSupabase = { BUCKET, clean, insertRun, listRuns, getRun, stats, downloadDocument, test };
+  root.FitonSupabase = { BUCKET, clean, insertRun, listRuns, getRun, stats, latestVersion, downloadDocument, test };
 })(typeof self !== 'undefined' ? self : this);

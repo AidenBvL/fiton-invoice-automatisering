@@ -1415,6 +1415,15 @@
         .fip-drop.is-over { border-color: var(--fip-accent); background: var(--fip-accent-soft); }
         .fip-drop-icon { font-size: 22px; margin-bottom: 6px; }
         .fip-drop-link { color: var(--fip-accent); cursor: pointer; text-decoration: underline; }
+        .fip-update {
+            display: block; font-size: 11.5px; line-height: 1.4; margin-bottom: 9px;
+            padding: 8px 10px; border-radius: 7px;
+            background: var(--fip-warn-bg); color: var(--fip-warn-text);
+            border: 1px solid var(--fip-warn-border);
+        }
+        .fip-update b { display: block; font-weight: 700; }
+        .fip-ver.is-old { color: var(--fip-warn-text); font-weight: 700; }
+
         .fip-doc {
             border: 1px solid var(--fip-border); border-radius: 8px; padding: 9px 10px;
             margin-top: 8px; background: var(--fip-surface);
@@ -5226,7 +5235,9 @@
            two invoices from the same carrier still each carry their own number. */
         let docs = [];
         let docSeq = 0;
-        let reading = false;
+        /* Dropping a second stack while the first is still being read must not
+           throw it away, so reads queue behind each other. */
+        let reading = Promise.resolve();
 
         // The shipment reference on the page tells us which container to pick.
         const pageText = (document.body && document.body.innerText) || '';
@@ -5264,11 +5275,14 @@
             return d;
         }
 
-        async function addFiles(fileList) {
+        function addFiles(fileList) {
             const files = [...(fileList || [])];
-            if (!files.length || reading) return;
-            reading = true;
-            let added = 0, failed = 0;
+            if (!files.length) return;
+            reading = reading.then(() => readFiles(files)).catch(e => log('Reading failed', String(e.message || e)));
+        }
+
+        async function readFiles(files) {
+            let failed = 0;
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 $('spec-status').textContent = files.length > 1
@@ -5287,7 +5301,6 @@
                         const keep = read.bytes && read.bytes.byteLength <= MAX_REPORT_DOC_BYTES
                             ? { name: file.name, base64: bytesToBase64(read.bytes) } : null;
                         docs.push(Object.assign(makeDoc(file.name, 'file', parsed, keep), { size: file.size }));
-                        added++;
                     }
                 } catch (err) {
                     log('PDF read failed', { file: file.name, error: err.message });
@@ -5298,25 +5311,25 @@
                 renderDocs();
                 renderResults();
             }
-            reading = false;
             if (failed) {
                 const details = overlay.querySelector('.fip-details');
                 if (details) details.open = true;      // open the paste box as a fallback
             }
-            renderStatus(added, failed);
+            renderStatus(failed);
         }
 
         // Pasted text has no images to go on, and there is only ever one of it.
         function handleText(text) {
             const existing = docs.findIndex(d => d.kind === 'text');
             if (existing >= 0) docs.splice(existing, 1);
-            if (String(text || '').trim()) {
+            const typed = String(text || '').trim();
+            if (typed) {
                 const parsed = parseInvoiceRows(rowsFromText(text), []);
                 if (parsed.transports.length) docs.push(makeDoc('geplakte tekst', 'text', parsed, null));
             }
             renderDocs();
             renderResults();
-            renderStatus();
+            renderStatus(0, !!typed);
         }
 
         function removeDoc(id) {
@@ -5331,10 +5344,12 @@
 
         /* ---------- painting ---------- */
 
-        function renderStatus(added, failed) {
+        function renderStatus(failed, pasted) {
             const good = docs.filter(d => !d.error);
             if (!docs.length) {
-                $('spec-status').textContent = 'Nog geen factuur ingelezen.';
+                $('spec-status').textContent = pasted
+                    ? 'Geen kostenregels herkend in de geplakte tekst.'
+                    : 'Nog geen factuur ingelezen.';
                 return;
             }
             const nLines = good.reduce((n, d) => n + d.parsed.transports.reduce((m, t) => m + t.lines.length, 0), 0);
@@ -6640,6 +6655,42 @@
         return hits.length === 1 ? hits[0] : null;   // only act when it is unambiguous
     }
 
+    /* Auto-updates only happen when the extension came from the Web Store or
+       from an update_url. Without that a colleague can sit on a version from
+       months ago and never know, which on a shared install means booking with
+       rules the rest of the department has already moved past. The service
+       worker asks the shared project every few hours which version is current;
+       this only shows the answer. */
+    function paintUpdateNotice(info) {
+        const box = document.getElementById('fip-update');
+        const ver = document.getElementById('fip-ver');
+        if (!box) return;
+        if (!info || !info.outdated) {
+            box.style.display = 'none';
+            if (ver) ver.classList.remove('is-old');
+            return;
+        }
+        box.innerHTML = `<b>Versie ${esc(info.latest)} is er — jij hebt ${esc(info.current || VERSION)}</b>`
+            + (info.notes ? `${esc(info.notes)}<br>` : '')
+            + 'Werk bij via het icoon van de extensie → Instellingen.';
+        box.style.display = 'block';
+        if (ver) ver.classList.add('is-old');
+    }
+
+    let updateNoticeWatched = false;
+
+    function watchUpdateNotice() {
+        try {
+            // The panel is rebuilt more than once, so repaint every time...
+            chrome.storage.local.get(['versionCheck'], d => paintUpdateNotice(d && d.versionCheck));
+            if (updateNoticeWatched) return;      // ...but listen only once
+            updateNoticeWatched = true;
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes.versionCheck) paintUpdateNotice(changes.versionCheck.newValue);
+            });
+        } catch (e) { log('Version check unavailable', String(e.message || e)); }
+    }
+
     function createUI() {
         try { buildPanel(); }
         catch (e) {
@@ -6658,7 +6709,7 @@
             <div class="fip-panel-head" id="fip-drag-handle">
                 <span class="fip-dot"></span>
                 <span class="fip-panel-title">Factuurregels</span>
-                <span class="fip-ver">v${VERSION} · ${CURRENCY_CODE}</span>
+                <span class="fip-ver" id="fip-ver">v${VERSION} · ${CURRENCY_CODE}</span>
                 <button class="fip-collapse" id="fip-collapse" title="In-/uitklappen">−</button>
             </div>
             <div class="fip-panel-body">
@@ -6671,6 +6722,7 @@
                     <option value="">Selecteer klant…</option>
                     ${Object.keys(CLIENTS).map(k => `<option value="${k}">${esc(CLIENTS[k].name)}</option>`).join('')}
                 </select>
+                <div class="fip-update" id="fip-update" style="display:none;"></div>
                 <div class="fip-detected" id="fip-detected" style="display:none;"></div>
                 <div class="fip-detected is-quiet" id="fip-pagehint" style="display:none;"></div>
                 <div class="fip-detected is-warn" id="fip-automap" style="display:none;">
@@ -6976,6 +7028,7 @@
             if (rep && rep.worklist) showWorklistReport(rep.worklist);
         });
         refreshReportButton();
+        watchUpdateNotice();
 
         const specBtnEl = document.getElementById('spec-import-btn');
         if (specBtnEl) specBtnEl.addEventListener('click', () => {
@@ -7105,6 +7158,7 @@
                     `FitOn Invoice Automation v${VERSION}`,
                     '',
                     '  fiton.info()          welke pagina, welke velden, welke knoppen',
+                    '  fiton.version()       draai je de nieuwste versie?',
                     '  fiton.readFile()      kies één of meer facturen en zie wat eruit komt',
                     '  fiton.readText(`…`)   idem voor geplakte tekst',
                     '  fiton.rows()          de gelezen regels met posities',

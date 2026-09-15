@@ -22,11 +22,21 @@
   button.primary { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
   button:hover { opacity:.92; }
   .msg { font-size:11.5px; color:#64748b; margin-top:9px; min-height:16px; }
+  .update {
+    display:none; border:1px solid #fde68a; background:#fffbeb; color:#92400e;
+    border-radius:7px; padding:9px 10px; font-size:12px; margin-bottom:8px;
+  }
+  .update b { display:block; font-size:12.5px; margin-bottom:2px; }
+  .update .notes { color:#78350f; margin-top:3px; }
+  .update a { color:#92400e; }
+  .ver .ok { color:#15803d; }
 </style>
 </head>
 <body>
   <h1>FitOn Invoice Automation</h1>
-  <div class="ver">Versie <span id="version">–</span></div>
+  <div class="ver">Versie <span id="version">–</span> <span id="version-state"></span></div>
+
+  <div class="update" id="update"></div>
 
   <div class="state"><span class="dot ok"></span><span>Omzetpagina: klaar</span></div>
   <div class="state"><span class="dot" id="cost-dot"></span><span id="cost-text">Kostenpagina: nog niet ingesteld</span></div>

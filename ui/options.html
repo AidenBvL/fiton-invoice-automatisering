@@ -170,6 +170,19 @@
   </div>
 
   <div class="card">
+    <h2>Versiecontrole <span class="badge" id="ver-state">–</span></h2>
+    <div class="hint" id="ver-result" style="margin:0 0 10px;">Wordt gecontroleerd…</div>
+    <div class="row">
+      <label for="versionUrl">Eigen JSON-bestand met de huidige versie (optioneel)</label>
+      <input type="text" id="versionUrl" placeholder="https://…/fiton-version.json">
+      <div class="hint">Leeg laten = het gedeelde Supabase-project vertelt welke versie de nieuwste is;
+        dat is voor bijna iedereen genoeg. Met een URL wordt die gebruikt in plaats daarvan. Het bestand
+        ziet er zo uit: <code>{"version": "9.20.0", "notes": "wat er nieuw is", "url": "https://…"}</code>.</div>
+    </div>
+    <button class="ghost" id="ver-check" type="button">Nu controleren</button>
+  </div>
+
+  <div class="card">
     <h2>Tarieven op afstand (optioneel)</h2>
     <div class="row">
       <label for="ratesUrl">URL naar een JSON-bestand met tarieven</label>

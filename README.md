@@ -7,8 +7,9 @@ Everything is reviewed and editable before a single line is written.
 - `content/invoice.js` — the whole tool: rate tables, config dialog, review screen, booking loop
 - `content/pdf-crypto.js` — decryption and glyph tables for PDFs that hide their text
 - `content/page-debug.js` — the `fiton.*` console commands, injected into the page
-- `background.js` — install/update handling, and sending reports (with the PDF) to Supabase
-- `supabase/` — `setup.sql` for the shared Supabase project, and how to connect (its own README)
+- `background.js` — install/update handling, the version check, and sending reports (with the PDF) to Supabase
+- `ui/version.js` — comparing version numbers, shared by the worker, popup and settings
+- `supabase/` — `setup.sql` for the shared Supabase project (reports, PDFs, released versions), and how to connect (its own README)
 - `dashboard/` — the older self-hosted dashboard server; **not part of the extension**
 - `ui/options.html|js` — settings, field mappings, remote rates URL, dashboard connection
 - `ui/dashboard.html|js` — the shared dashboard, read straight from Supabase
@@ -29,7 +30,24 @@ Local loading ignores `update_url`, so this is for testing only.
 
 ---
 
-## 2. Cost lines
+## 2. Reading invoices in
+
+Panel → **Facturen inlezen** (on Forwarding > Search). Drop **one or more** PDFs
+on it: a stack of container notes from the same carrier goes in one go.
+
+Each document keeps its own invoice number, creditor and totals check — nothing
+is shared between them, so two notes from the same carrier do not overwrite each
+other's creditor. Every shipment found across all of them lands in one worklist,
+and each line is booked with the invoice number and creditor of the invoice it
+came from. Tick per shipment, per invoice, or the lot.
+
+Afterwards the end report groups per invoice, and the dashboard gets **one row
+per invoice** rather than one for the batch — it is searched by invoice number,
+and a row covering three of them would be findable under none.
+
+---
+
+## 3. Cost lines
 
 The revenue page field names are known and built in. The **cost page differs per
 installation**, so it is mapped once, in the browser, without anyone reading HTML:
@@ -51,7 +69,7 @@ from the *net net as per outlay* fields, which are already amount-entry.
 
 ---
 
-## 3. Distribution with auto-updates
+## 4. Distribution with auto-updates
 
 Two routes. Pick one before sharing anything.
 
@@ -91,9 +109,33 @@ unless the extension is allowlisted by enterprise policy**. This route needs IT.
 Chrome checks roughly every 5 hours. The popup's **Controleer op updates** forces
 a check immediately, which is useful when you want everyone on a fix today.
 
+### Is everyone on the current version?
+
+Neither route above says anything while you are still on route zero — loading
+the folder unpacked — and a colleague can then sit on a version from months ago
+without a thing to tell them. So the extension asks as well, every six hours,
+and shows it in the popup, in the settings and in the panel on the page itself.
+Nothing is downloaded or installed by that check; it only says you are behind.
+
+It asks the shared Supabase project (`supabase/setup.sql`, section 4). Announce
+a version by putting one row in `releases`:
+
+```sql
+insert into public.releases (version, notes, url)
+values ('9.20.0', 'Meerdere facturen tegelijk inlezen', 'https://…');
+```
+
+With no row there, the newest version is derived from the reports themselves —
+every booking run says which version it ran on, and a version counts once two
+runs have carried it. So even without anyone maintaining that table, a colleague
+who is behind finds out the first time someone else books on a newer one.
+
+Not on Supabase? Settings takes the HTTPS URL of a JSON file instead:
+`{"version": "9.20.0", "notes": "wat er nieuw is", "url": "https://…"}`.
+
 ---
 
-## 4. Crediteuren bijwerken
+## 5. Crediteuren bijwerken
 
 Open een kostenregel in FitOn en klik in het paneel op **Crediteuren verversen**.
 De extensie leest dan het crediteurvenster helemaal uit, inclusief "Show More",
@@ -108,7 +150,7 @@ geleerd is.
 
 ---
 
-## 5. Optioneel: gedeeld dashboard
+## 6. Optioneel: gedeeld dashboard
 
 Zonder dit blijft alles zoals het was: rapporten staan alleen op je eigen
 machine. Met een gedeeld Supabase-project ziet iedereen op de afdeling elke
@@ -122,7 +164,7 @@ Wie liever een eigen server draait: `dashboard/README.md`.
 
 ---
 
-## 6. Optional: rates from a URL
+## 7. Optional: rates from a URL
 
 Settings accepts an HTTPS URL to a JSON rate file. With it set, rates can be
 changed for everyone without shipping a version. Leave it blank to use the tables
@@ -138,7 +180,8 @@ Op een FitOnPortal-pagina:
 ```
 fiton.help()          alle commando's
 fiton.info()          versie, herkende pagina, veldnamen, knoppen
-fiton.readFile()      kies een factuur en zie precies wat eruit komt
+fiton.version()       draai je de nieuwste versie?
+fiton.readFile()      kies één of meer facturen en zie precies wat eruit komt
 fiton.readText(`…`)   idem voor geplakte tekst
 fiton.rows()          de gelezen regels met posities
 fiton.ledger('Tol')   welk grootboek een omschrijving krijgt

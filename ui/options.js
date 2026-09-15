@@ -112,7 +112,7 @@ function paintDashboardState() {
   $('dash-state').className = 'badge' + (linked || own ? '' : ' warn');
 }
 
-chrome.storage.sync.get(['maps', 'pages', 'ratesUrl', 'defaultMode', 'supabaseUrl', 'supabaseKey', 'dashboardUrl', 'dashboardToken', 'dashboardSendDocument'], data => {
+chrome.storage.sync.get(['maps', 'pages', 'ratesUrl', 'versionUrl', 'defaultMode', 'supabaseUrl', 'supabaseKey', 'dashboardUrl', 'dashboardToken', 'dashboardSendDocument'], data => {
   $('supabaseUrl').value = data.supabaseUrl || '';
   $('supabaseKey').value = data.supabaseKey || '';
   const pages = Object.assign({}, DEFAULT_PAGES, data.pages || {});
@@ -129,6 +129,7 @@ chrome.storage.sync.get(['maps', 'pages', 'ratesUrl', 'defaultMode', 'supabaseUr
     });
   }
   $('ratesUrl').value = data.ratesUrl || '';
+  $('versionUrl').value = data.versionUrl || '';
   $('defaultMode').value = data.defaultMode || 'revenue';
   renderFields($('rev-fields'), 'revenue', current.revenue);
   renderFields($('cost-fields'), 'cost', current.cost);
@@ -150,6 +151,12 @@ $('save').addEventListener('click', () => {
   const url = $('ratesUrl').value.trim();
   if (url && !/^https:\/\//i.test(url)) {
     status('De tarieven-URL moet met https:// beginnen.', 'err');
+    return;
+  }
+
+  const versionUrl = $('versionUrl').value.trim();
+  if (versionUrl && !/^https:\/\//i.test(versionUrl)) {
+    status('De versie-URL moet met https:// beginnen.', 'err');
     return;
   }
 
@@ -180,14 +187,14 @@ $('save').addEventListener('click', () => {
 
   // Without access to these addresses Chrome blocks the report. Asked here,
   // while the click still counts as a user gesture.
-  const origins = [supabaseUrl, dashboardUrl].filter(Boolean).map(address => {
+  const origins = [supabaseUrl, dashboardUrl, versionUrl].filter(Boolean).map(address => {
     try { const u = new URL(address); return `${u.protocol}//${u.hostname}/*`; } catch (e) { return null; }
   }).filter(Boolean);
   if (origins.length) chrome.permissions.request({ origins }, granted => {
     if (!granted) status('Geen toegang tot het dashboardadres gekregen: rapporten blijven in de wachtrij.', 'err');
   });
 
-  chrome.storage.sync.set({ maps, pages, ratesUrl: url, defaultMode: $('defaultMode').value,
+  chrome.storage.sync.set({ maps, pages, ratesUrl: url, versionUrl, defaultMode: $('defaultMode').value,
                             supabaseUrl, supabaseKey,
                             dashboardUrl, dashboardToken: $('dashboardToken').value.trim(),
                             dashboardSendDocument: $('dashboardSendDocument').checked }, () => {
@@ -223,9 +230,13 @@ $('check').addEventListener('click', () => {
   status('Bezig met controleren…');
   chrome.runtime.sendMessage({ type: 'checkForUpdate' }, res => {
     if (!res) { status('Controle mislukt.', 'err'); return; }
+    const latest = res.latest || {};
+    paintVersionCheck(latest);
     if (res.status === 'update_available') status('Update gevonden — wordt geïnstalleerd.', 'ok');
-    else if (res.status === 'no_update') status('Je hebt de nieuwste versie.', 'ok');
-    else status('Controle: ' + res.status);
+    else if (latest.outdated) status(`Versie ${latest.latest} is beschikbaar — zie Versiecontrole.`, 'err');
+    else if (res.status === 'no_update' || latest.latest) status('Je hebt de nieuwste versie.', 'ok');
+    else if (!latest.configured) status('Niets om aan te vragen welke versie de nieuwste is — zie Versiecontrole.', 'err');
+    else status('Nog geen versie bekend om tegen te vergelijken.');
   });
 });
 
@@ -297,4 +308,55 @@ $('cred-clear').addEventListener('click', () => {
     paintCreditors(null, null);
     status('Crediteurenlijst gewist.', 'ok');
   });
+});
+
+/* ---- versiecontrole -------------------------------------------------------
+   Laat zien of deze installatie nog de huidige is. Het controleren zelf doet
+   de service worker; hier staat alleen wat eruit kwam, plus een knop om het
+   meteen opnieuw te vragen. */
+
+function paintVersionCheck(info) {
+  const badge = $('ver-state');
+  const out = $('ver-result');
+  if (!badge || !out) return;
+  const when = t => new Date(t).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  if (!info) {
+    badge.textContent = '–';
+    badge.className = 'badge';
+    out.textContent = 'Nog niet gecontroleerd.';
+    return;
+  }
+  if (!info.configured) {
+    badge.textContent = 'geen bron';
+    badge.className = 'badge warn';
+    out.textContent = 'Er is niets om aan te vragen welke versie de nieuwste is. Vul hierboven het gedeelde '
+      + 'Supabase-project in, of hieronder een eigen JSON-bestand.';
+    return;
+  }
+  if (info.outdated) {
+    badge.textContent = 'verouderd';
+    badge.className = 'badge warn';
+    out.innerHTML = `Versie <b>${info.latest}</b> is er; deze computer draait <b>${info.current}</b>.`
+      + (info.notes ? ' ' + info.notes : '')
+      + (info.url ? ` <a href="${info.url}" target="_blank" rel="noreferrer">Nieuwe versie ophalen</a>.` : '');
+    return;
+  }
+  badge.textContent = info.error ? 'onbekend' : 'up-to-date';
+  badge.className = info.error ? 'badge warn' : 'badge';
+  out.textContent = info.error
+    ? `Laatste controle mislukt: ${info.error}` + (info.checkedOkAt ? ` (laatst gelukt ${when(info.checkedOkAt)})` : '')
+    : `Deze computer draait ${info.current}`
+      + (info.latest ? `, en dat is de nieuwste` : ', er is nog geen versie gepubliceerd')
+      + (info.checkedAt ? ` · gecontroleerd ${when(info.checkedAt)}` : '');
+}
+
+chrome.storage.local.get(['versionCheck'], d => paintVersionCheck(d.versionCheck));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.versionCheck) paintVersionCheck(changes.versionCheck.newValue);
+});
+
+if ($('ver-check')) $('ver-check').addEventListener('click', () => {
+  $('ver-result').textContent = 'Bezig met controleren…';
+  chrome.runtime.sendMessage({ type: 'checkVersion' }, info => paintVersionCheck(info));
 });

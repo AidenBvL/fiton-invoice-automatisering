@@ -190,6 +190,7 @@
     state: () => call('state').then(show),
     timing: () => call('timing').then(show),
     diagnose: () => call('diagnose').then(show),
+    marks: () => call('marks').then(show),
     version: () => call('version').then(show),
     capture: flag => call('capture', [flag !== false]).then(show),
     requests: what => call('requests', [what]).then(show)
