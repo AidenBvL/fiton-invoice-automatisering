@@ -4471,6 +4471,28 @@
             return (t.match(/[A-Za-z]{3,}/g) || []).length >= 2 ? t : '';
         };
 
+        /* A label and its amount are one line on the page, but they can reach us
+           as two rows: MSC writes "Total excl. VAT" and the 600,00 beside it with
+           baselines half a point apart, and rows are grouped on the baseline. The
+           label then ends up in a row with no amount, and its amount in a row with
+           no label - which is read as a charge, so the invoice totals three times
+           what it says. Before booking, look at what else is on this line.
+           Only a hair of difference counts: lines sit further apart than this. */
+        const SAME_LINE_Y = 2.5;
+        const sameLineRows = i => {
+            const out = [];
+            for (let j = Math.max(0, i - 3); j <= Math.min(rows.length - 1, i + 3); j++) {
+                if (j !== i && Math.abs(rows[j].y - rows[i].y) <= SAME_LINE_Y) out.push(rows[j]);
+            }
+            return out;
+        };
+        const totalLabelBeside = i => sameLineRows(i).some(r =>
+            !moneyCellsOf(r).length && TOTAL_DESC.test(r.raw.trim()));
+
+        /* "600,00 EUR @ 0 % VAT   EUR 0,00" states what the VAT was worked out
+           over. The 600,00 is the basis, not a charge of its own. */
+        const VAT_RATE_ROW = /@\s*\d+(?:[.,]\d+)?\s*%\s*(?:vat|btw|tva|mwst|ust|iva|moms|tax)\b/i;
+
         const newGroup = (unit, ref, heading) => {
             current = { container: unit && unit.kind === 'container' ? unit.value : '', unit: unit || null,
                         ref: ref || '', heading: heading || '', lines: [], containers: [] };
@@ -4551,6 +4573,13 @@
                others. So a row whose description starts with a total word is
                never booked; its amount is kept to check the charges against. */
             if (TOTAL_DESC.test(desc)) { labelledTotals.push(round2(amount)); return; }
+
+            /* The same total, with its label in a row of its own: the amount is
+               that label's, not of whatever text happened to land beside it. */
+            if (totalLabelBeside(rowIndex)) { labelledTotals.push(round2(amount)); return; }
+
+            // A row stating a VAT rate is the tax specification, never a charge.
+            if (VAT_RATE_ROW.test(row.raw)) return;
 
             /* We book everything at 0% VAT, so a VAT line on the invoice is never
                a cost for us. It is remembered, so the charges can still be checked
