@@ -1415,6 +1415,29 @@
         .fip-drop.is-over { border-color: var(--fip-accent); background: var(--fip-accent-soft); }
         .fip-drop-icon { font-size: 22px; margin-bottom: 6px; }
         .fip-drop-link { color: var(--fip-accent); cursor: pointer; text-decoration: underline; }
+        .fip-doc {
+            border: 1px solid var(--fip-border); border-radius: 8px; padding: 9px 10px;
+            margin-top: 8px; background: var(--fip-surface);
+        }
+        .fip-doc.is-bad { border-color: #fecaca; background: #fef2f2; }
+        .fip-doc-head { display: flex; align-items: center; gap: 8px; }
+        .fip-doc-name {
+            font-size: 12.5px; font-weight: 600; flex: none; max-width: 42%;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .fip-doc-meta { flex: 1; font-size: 11px; color: var(--fip-muted); text-align: right; }
+        .fip-doc-del {
+            flex: none; border: none; background: none; cursor: pointer; line-height: 1;
+            font-size: 17px; color: var(--fip-muted); padding: 0 2px;
+        }
+        .fip-doc-del:hover { color: var(--fip-danger); }
+        .fip-doc-fields {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 8px; margin-top: 8px;
+        }
+        .fip-docgroup td { background: var(--fip-bg); font-size: 11.5px; padding-top: 7px; }
+        .fip-docgroup td:last-child { font-variant-numeric: tabular-nums; }
+
         .fip-details { margin-top: 10px; }
         .fip-details summary { font-size: 12px; color: var(--fip-muted); cursor: pointer; }
         .fip-details[open] summary { margin-bottom: 7px; }
@@ -2331,6 +2354,8 @@
     const WORKLIST_KEY = 'fiton_worklist';
     const REPORT_KEY = 'fiton_last_report';
     const REPORT_DOC_KEY = 'fiton_report_document';   // chrome.storage.local: the PDF for the dashboard
+    const MAX_REPORT_DOC_BYTES = 4 * 1024 * 1024;     // per invoice, as before
+    const MAX_REPORT_DOC_TOTAL = 32 * 1024 * 1024;   // for a stack of them together
 
     /* How long to give FitOn to return a search result before deciding a
        container does not exist. The result grid loads after the page does, so
@@ -2473,11 +2498,15 @@
         /* Every column filled whatever the transport: a road invoice has no
            container, a rail one no shipment id - so each row shows what it does
            have, and what was on the invoice for it. */
+        const invoices = worklistInvoices(w);
+        const many = invoices.length > 1;
         const rows = w.items.map(i => {
             const l = LABEL[i.status] || LABEL.pending;
             const facts = transportFacts(i);
             const names = chargeNames(i);
+            const inv = itemInvoice(w, i);
             return `<tr>
+                ${many ? `<td><b>${esc(inv.invoiceNo || '—')}</b>${inv.creditorName ? `<div class="fip-ledger">${esc(inv.creditorName)}</div>` : ''}</td>` : ''}
                 <td><b>${esc(transportName(i) || '—')}</b>${facts.length ? `<div class="fip-ledger">${esc(facts.join(' · '))}</div>` : ''}</td>
                 <td class="fip-reason">${names.length ? esc(names.slice(0, 3).join(', ')) + (names.length > 3 ? ` +${names.length - 3}` : '') : '—'}</td>
                 <td class="num">${lineCount(i)}</td>
@@ -2486,24 +2515,26 @@
                 <td class="fip-reason">${esc(i.reason || (i.status === 'done' ? '' : '—'))}</td>
             </tr>`;
         }).join('');
-        const head = [w.creditor || w.creditorName, w.amount != null ? `factuurtotaal ${money(w.amount)}` : '']
-            .filter(Boolean).join(' · ');
+        const head = many
+            ? invoices.map(i => [i.invoiceNo || '?', i.creditorName].filter(Boolean).join(' — ')).join(' · ')
+            : [w.creditor || w.creditorName, w.amount != null ? `factuurtotaal ${money(w.amount)}` : '']
+                .filter(Boolean).join(' · ');
 
         const overlay = document.createElement('div');
         overlay.className = 'fip-ask fip-root';
         overlay.innerHTML = `
             <div class="fip-ask-box" style="max-width:880px;">
-                <div class="fip-ask-title">Eindrapport — factuur ${esc(w.invoiceNo || '')}</div>
+                <div class="fip-ask-title">Eindrapport — ${many ? `${invoices.length} facturen` : `factuur ${esc((invoices[0] && invoices[0].invoiceNo) || w.invoiceNo || '')}`}</div>
                 ${head ? `<div class="fip-hint" style="margin:-4px 0 8px;">${esc(head)}</div>` : ''}
                 <div class="fip-report-summary">
                     <span><b>${count('done')}</b> geboekt (${money(bookedSum)})</span>
                     <span><b>${count('duplicate')}</b> overgeslagen</span>
                     <span><b>${count('notfound') + count('failed')}</b> niet gelukt</span>
-                    <span><b>${w.items.length}</b> totaal</span>
+                    <span><b>${w.items.length}</b> totaal${many ? ` uit <b>${invoices.length}</b> facturen` : ''}</span>
                 </div>
                 <div class="fip-report-scroll">
                     <table class="fip-table">
-                        <thead><tr><th>Zending</th><th>Kosten</th><th class="num">Regels</th><th class="num">Bedrag</th><th>Resultaat</th><th>Reden</th></tr></thead>
+                        <thead><tr>${many ? '<th>Factuur</th>' : ''}<th>Zending</th><th>Kosten</th><th class="num">Regels</th><th class="num">Bedrag</th><th>Resultaat</th><th>Reden</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
@@ -2520,11 +2551,16 @@
             if (act && act.act === 'close') close();
             if (act && act.act === 'copy') {
                 const unitOf = i => i.container ? 'Container' : i.unit && UNIT_KINDS[i.unit.kind] ? UNIT_KINDS[i.unit.kind].label : '';
-                const tsv = ['Zending\tEenheid\tSoort vervoer\tReferentie\tKosten\tRegels\tBedrag\tResultaat\tReden']
-                    .concat(w.items.map(i => [transportName(i), unitOf(i), MODALITY[modalityOf(i, i.modality)] || '',
-                        i.ref || '', chargeNames(i).join(', '), lineCount(i),
-                        i.total.toFixed(2).replace('.', ','),
-                        (LABEL[i.status] || LABEL.pending).text, i.reason || ''].join('\t')))
+                const tsv = [(many ? 'Factuur\tCrediteur\t' : '')
+                        + 'Zending\tEenheid\tSoort vervoer\tReferentie\tKosten\tRegels\tBedrag\tResultaat\tReden']
+                    .concat(w.items.map(i => {
+                        const inv = itemInvoice(w, i);
+                        return (many ? [inv.invoiceNo, inv.creditorName] : []).concat([
+                            transportName(i), unitOf(i), MODALITY[modalityOf(i, i.modality)] || '',
+                            i.ref || '', chargeNames(i).join(', '), lineCount(i),
+                            i.total.toFixed(2).replace('.', ','),
+                            (LABEL[i.status] || LABEL.pending).text, i.reason || '']).join('\t');
+                    }))
                     .join('\n');
                 navigator.clipboard.writeText(tsv).then(() => {
                     const b = overlay.querySelector('[data-act="copy"]');
@@ -2536,6 +2572,43 @@
         });
     }
 
+    /* Which invoice a line came from. Several invoices can be read in at once,
+       and then each line carries its own number and creditor; a worklist saved
+       by an older version has them only at the top, so that is the fallback. */
+    function itemInvoice(w, item) {
+        const own = item || {};
+        const has = key => own[key] !== undefined && own[key] !== null;
+        return {
+            invoiceNo:    String((has('invoiceNo')    ? own.invoiceNo    : w.invoiceNo) || '').trim(),
+            creditorSeq:  String((has('creditorSeq')  ? own.creditorSeq  : w.creditorSeq) || '').trim(),
+            creditorName: String((has('creditorName') ? own.creditorName : (w.creditorName || w.creditor)) || '').trim()
+        };
+    }
+
+    /* The distinct invoices in a worklist, in the order they were read in.
+       `w.docs` holds what was read per document — the totals and whether they
+       added up — and is the source when it is there; a worklist from before
+       9.20 has only the lines, so the invoices are derived from those. */
+    const invoiceKey = (w, item) => item.docId || itemInvoice(w, item).invoiceNo || '';
+
+    function worklistInvoices(w) {
+        const used = new Set((w.items || []).map(i => invoiceKey(w, i)));
+        if (Array.isArray(w.docs) && w.docs.length) {
+            const known = w.docs.filter(d => used.has(d.docId || d.invoiceNo || ''));
+            if (known.length) return known.map(d => Object.assign({}, d));
+        }
+        const seen = new Map();
+        (w.items || []).forEach(item => {
+            const key = invoiceKey(w, item);
+            if (!seen.has(key)) {
+                seen.set(key, Object.assign({
+                    docId: item.docId || '', docName: item.docName || w.fileName || ''
+                }, itemInvoice(w, item)));
+            }
+        });
+        return [...seen.values()];
+    }
+
     /* Is this container's cost already on the shipment? The description we write
        carries the invoice number and the container, so finding both in the costs
        list means it has been booked before. With descriptions set to "alleen
@@ -2543,7 +2616,7 @@
     function alreadyBooked(item, w) {
         const text = (document.body && document.body.innerText) || '';
         if (w.descMode === 'name') return { dup: false, blind: true };
-        const invoice = (w.invoiceNo || '').trim();
+        const invoice = itemInvoice(w, item).invoiceNo;
         // Found by shipment id or reference: the page IS that shipment, so only
         // the invoice number decides.
         const unitValue = item.container || (item.unit && item.unit.value);
@@ -2570,7 +2643,8 @@
         if (!rows.length) return '';
         const quote = r => `"${r.text.slice(0, 90)}"`;
 
-        const invoice = String(w.invoiceNo || '').trim();
+        const ctx = itemInvoice(w, item);
+        const invoice = ctx.invoiceNo;
         if (invoice.length >= 4) {
             const hit = rows.find(r => r.text.includes(invoice));
             if (hit) return `Factuur ${invoice} staat al op deze zending: ${quote(hit)}`;
@@ -2578,7 +2652,7 @@
 
         const lines = (item.lines || []).filter(l => l.amount);
         const total = round2(item.total || 0);
-        const creditor = creditorKey(w.creditorName || w.creditor || '');
+        const creditor = creditorKey(ctx.creditorName);
         const fromCreditor = r => !!creditor && creditorKey(r.text).includes(creditor);
         const has = (r, v) => r.amounts.some(a => Math.abs(a - v) < 0.005);
         const several = lines.length >= 2;
@@ -2631,7 +2705,10 @@
             clearWorklist();
             setStatus(`Klaar — ${booked}/${w.items.length} zendingen geboekt`, clean ? 'done' : 'error', 100);
             setSubStatus('');
-            panelMessage(`Factuur ${w.invoiceNo}: ${booked} van de ${w.items.length} zendingen geboekt.`,
+            const invoices = worklistInvoices(w);
+            panelMessage(invoices.length > 1
+                ? `${invoices.length} facturen: ${booked} van de ${w.items.length} zendingen geboekt.`
+                : `Factuur ${invoices[0] ? invoices[0].invoiceNo : (w.invoiceNo || '')}: ${booked} van de ${w.items.length} zendingen geboekt.`,
                 clean ? 'ok' : 'error');
             try { localStorage.setItem(REPORT_KEY, JSON.stringify({ at: Date.now(), worklist: w })); } catch (e) {}
             reportWorklist(w, booked, clean);
@@ -2781,16 +2858,17 @@
         /* STEP 3 - Cost form: book this container's lines. */
         if (MODE === 'cost' && el('ledger')) {
             // Never book the same specification onto the same shipment twice.
+            const ctx = itemInvoice(w, item);
             const dup = alreadyBooked(item, w);
             if (dup.dup && !w.ignoreExisting) {
-                log(`${who} already carries invoice ${w.invoiceNo} - skipping`);
-                skipWorklistItem(w, item, `Factuur ${w.invoiceNo} staat al op deze zending`, who);
+                log(`${who} already carries invoice ${ctx.invoiceNo} - skipping`);
+                skipWorklistItem(w, item, `Factuur ${ctx.invoiceNo} staat al op deze zending`, who);
                 return;
             }
             if (dup.blind) item.reason = 'Dubbelcontrole niet mogelijk (omschrijving zonder factuurnummer)';
 
             const items = buildSpecItems(item, {
-                invoiceNo: w.invoiceNo, creditorSeq: w.creditorSeq, creditorName: w.creditorName,
+                invoiceNo: ctx.invoiceNo, creditorSeq: ctx.creditorSeq, creditorName: ctx.creditorName,
                 descMode: w.descMode, combine: w.combine
             });
             setSubStatus(`${who} · ${items.length} regels boeken…`);
@@ -3399,8 +3477,10 @@
 
     /* A run from an invoice books one container per page load, and every page
        load starts this script over, so REPORT_CONTEXT and the PDF are long gone
-       by the last container. The worklist carries what the report needs, the PDF
-       waits in extension storage, and one report goes out for the whole invoice. */
+       by the last container. The worklist carries what the report needs and the
+       PDFs wait in extension storage. One report goes out per invoice, also when
+       several were read in at once: the dashboard is searched by invoice number,
+       so a row that covered three of them would be findable under none. */
     async function reportWorklist(w, booked, clean) {
         try {
             const cfg = await new Promise(res => chrome.storage.sync.get(
@@ -3409,43 +3489,68 @@
             await chrome.storage.local.remove(REPORT_DOC_KEY);
             if (!dashboardConfigured(cfg)) return;
 
-            const report = {
-                at: Date.now(), outcome: clean ? 'done' : 'error',
-                user: w.user || fitonUser(),          // who read the invoice in
-                message: `${booked} van de ${w.items.length} zendingen geboekt`,
-                invoiceNo: w.invoiceNo || '', creditor: w.creditor || w.creditorName || '',
-                creditorSeq: w.creditorSeq || '',
-                shipment: [...new Set(w.items.map(i => i.ref).filter(Boolean))].join(', ').slice(0, 200),
-                container: [...new Set(w.items.map(i => i.container || (i.unit && i.unit.value)).filter(Boolean))].join(', ').slice(0, 200),
-                lines: w.items.length, booked,
-                amount: w.amount != null ? w.amount : w.items.reduce((a, i) => a + (Number(i.total) || 0), 0),
-                items: w.items.map(i => ({
-                    desc: [transportName(i) || '?', transportFacts(i).join(' · ')].filter(Boolean).join(' — ')
-                        + (i.status === 'done' ? '' : ` (${i.reason || i.status})`),
-                    ledger: '', ledgerName: '', qty: 1, price: i.total, amount: i.total
-                })),
-                // The whole picture per transport, for the dashboard's detail view.
-                transports: w.items.map(i => ({
-                    name: transportName(i), facts: transportFacts(i), status: i.status, reason: i.reason || '',
-                    total: i.total, bookedLines: i.bookedLines || null,
-                    lines: (i.lines || []).map(l => {
-                        const led = ledgerForSpecLine(l.desc, l);
-                        return { desc: l.desc, qty: l.qty, price: l.unitPrice, amount: l.amount, ledger: led.id, ledgerName: led.name };
-                    })
-                })),
-                bookedAmount: round2(w.items.filter(i => i.status === 'done').reduce((a, i) => a + (Number(i.total) || 0), 0)),
-                fileName: w.fileName || '', confidence: w.confidence || '',
-                statedTotal: w.statedTotal != null ? w.statedTotal : null,
-                descMode: w.descMode || '', combine: !!w.combine, ignoreExisting: !!w.ignoreExisting,
-                startedAt: w.startedAt || null, durationMs: w.startedAt ? Date.now() - w.startedAt : null,
-                mode: 'cost',
-                version: chrome.runtime.getManifest().version,
-                machine: navigator.userAgent.replace(/^.*\((.*?)\).*$/, '$1').slice(0, 60)
+            /* An array since 9.20; a single document before that. */
+            const kept = stored[REPORT_DOC_KEY];
+            const documents = Array.isArray(kept) ? kept : (kept ? [kept] : []);
+            const documentFor = group => {
+                const hit = documents.find(d => d && (d.docId || '') === group.docId);
+                return hit || (documents.length === 1 && !documents[0].docId ? documents[0] : null);
             };
-            if (cfg.dashboardSendDocument && stored[REPORT_DOC_KEY]) report.document = stored[REPORT_DOC_KEY];
 
-            const res = await chrome.runtime.sendMessage({ type: 'sendReport', report });
-            if (res && res.queued) log(`Report queued (${res.queued} waiting): ${res.error || ''}`);
+            const invoices = worklistInvoices(w);
+            const groups = invoices.map(inv => Object.assign({}, inv, {
+                items: w.items.filter(i => invoiceKey(w, i) === (inv.docId || inv.invoiceNo || ''))
+            })).filter(g => g.items.length);
+
+            for (const group of groups) {
+                const items = group.items;
+                const groupBooked = items.filter(i => i.status === 'done').length;
+                const groupClean = groupBooked === items.length;
+                const report = {
+                    at: Date.now(), outcome: groupClean ? 'done' : 'error',
+                    user: w.user || fitonUser(),          // who read the invoice in
+                    message: `${groupBooked} van de ${items.length} zendingen geboekt`,
+                    invoiceNo: group.invoiceNo || '', creditor: group.creditorName || '',
+                    creditorSeq: group.creditorSeq || '',
+                    shipment: [...new Set(items.map(i => i.ref).filter(Boolean))].join(', ').slice(0, 200),
+                    container: [...new Set(items.map(i => i.container || (i.unit && i.unit.value)).filter(Boolean))].join(', ').slice(0, 200),
+                    lines: items.length, booked: groupBooked,
+                    amount: group.amount != null ? group.amount
+                          : groups.length === 1 && w.amount != null ? w.amount
+                          : round2(items.reduce((a, i) => a + (Number(i.total) || 0), 0)),
+                    items: items.map(i => ({
+                        desc: [transportName(i) || '?', transportFacts(i).join(' · ')].filter(Boolean).join(' — ')
+                            + (i.status === 'done' ? '' : ` (${i.reason || i.status})`),
+                        ledger: '', ledgerName: '', qty: 1, price: i.total, amount: i.total
+                    })),
+                    // The whole picture per transport, for the dashboard's detail view.
+                    transports: items.map(i => ({
+                        name: transportName(i), facts: transportFacts(i), status: i.status, reason: i.reason || '',
+                        total: i.total, bookedLines: i.bookedLines || null,
+                        lines: (i.lines || []).map(l => {
+                            const led = ledgerForSpecLine(l.desc, l);
+                            return { desc: l.desc, qty: l.qty, price: l.unitPrice, amount: l.amount, ledger: led.id, ledgerName: led.name };
+                        })
+                    })),
+                    bookedAmount: round2(items.filter(i => i.status === 'done').reduce((a, i) => a + (Number(i.total) || 0), 0)),
+                    fileName: group.docName || w.fileName || '',
+                    confidence: group.confidence || (groups.length === 1 ? (w.confidence || '') : ''),
+                    statedTotal: group.statedTotal != null ? group.statedTotal
+                               : (groups.length === 1 && w.statedTotal != null ? w.statedTotal : null),
+                    descMode: w.descMode || '', combine: !!w.combine, ignoreExisting: !!w.ignoreExisting,
+                    startedAt: w.startedAt || null, durationMs: w.startedAt ? Date.now() - w.startedAt : null,
+                    // Only meaningful when more than one invoice went in at once.
+                    batchInvoices: groups.length > 1 ? groups.length : null,
+                    mode: 'cost',
+                    version: chrome.runtime.getManifest().version,
+                    machine: navigator.userAgent.replace(/^.*\((.*?)\).*$/, '$1').slice(0, 60)
+                };
+                const doc = documentFor(group);
+                if (cfg.dashboardSendDocument && doc && doc.base64) report.document = { name: doc.name, base64: doc.base64 };
+
+                const res = await chrome.runtime.sendMessage({ type: 'sendReport', report });
+                if (res && res.queued) log(`Report queued (${res.queued} waiting): ${res.error || ''}`);
+            }
         } catch (e) {
             log('Report not sent', String(e.message || e));
         }
@@ -5021,11 +5126,19 @@
         return items;
     }
 
+    /* Several invoices at once: a stack of container notes from the same carrier
+       is the normal case, and reading them in one at a time means retyping the
+       booking settings for every one. Each document keeps its own invoice
+       number, creditor and totals check - they are never shared - and the
+       shipments of all of them are booked in a single run. */
     function showSpecImportModal(callback) {
         if (document.querySelector('.fip-overlay')) return;
 
         let prefs = {};
         try { prefs = JSON.parse(localStorage.getItem('fiton_spec_prefs') || '{}'); } catch (e) {}
+
+        const CREDITOR_OPTIONS = CREDITORS.slice().sort((a, b) => a.name.localeCompare(b.name))
+            .map(c => `<option value="${esc(c.seq)}" data-name="${esc(c.name)}">${esc(c.name)} (${esc(c.seq)})</option>`).join('');
 
         const overlay = document.createElement('div');
         overlay.className = 'fip-overlay fip-root';
@@ -5033,27 +5146,27 @@
         <div class="fip-modal">
             <div class="fip-modal-head">
                 <div>
-                    <h3>Factuur inlezen</h3>
-                    <p>Sleep de PDF erin — de extensie leest zelf wie hem stuurde, welke kosten erop staan en bij welke zending ze horen</p>
+                    <h3>Facturen inlezen</h3>
+                    <p>Sleep er één of meer PDF's in — de extensie leest per factuur wie hem stuurde, welke kosten erop staan en bij welke zending ze horen</p>
                 </div>
                 <button class="fip-modal-close" id="spec-cancel" title="Sluiten (Esc)">&times;</button>
             </div>
 
             <div class="fip-modal-body">
                 <div class="fip-card">
-                    <div class="fip-card-title">Document</div>
+                    <div class="fip-card-title">Documenten <span class="fip-count" id="spec-doccount">0</span></div>
                     <div class="fip-drop" id="spec-drop">
                         <div class="fip-drop-icon">📄</div>
-                        <div><b>Sleep hier een factuur</b> of <label class="fip-drop-link">kies een bestand<input type="file" id="spec-file" accept=".pdf,.txt" hidden></label></div>
-                        <div class="fip-hint">Elke leverancier en elke vervoerswijze — rederij, transporteur, spoor, luchtvracht, koelhuis, keurpunt. PDF wordt direct gelezen, geen OCR en geen upload.</div>
+                        <div><b>Sleep hier je facturen</b> of <label class="fip-drop-link">kies bestanden<input type="file" id="spec-file" accept=".pdf,.txt" multiple hidden></label></div>
+                        <div class="fip-hint">Meerdere tegelijk mag: een stapel containernota's van dezelfde rederij gaat in één keer. Elke leverancier en elke vervoerswijze — rederij, transporteur, spoor, luchtvracht, koelhuis, keurpunt. PDF wordt direct gelezen, geen OCR en geen upload.</div>
                     </div>
+                    <div id="spec-docs"></div>
                     <details class="fip-details">
                         <summary>of tekst plakken</summary>
                         <textarea id="spec-text" class="fip-textarea" rows="4"
                             placeholder="Plak hier de tekst van de factuur…"></textarea>
                     </details>
                     <div class="fip-hint" id="spec-status">Nog geen factuur ingelezen.</div>
-                    <div class="fip-detected" id="spec-summary" style="display:none;"></div>
                 </div>
 
                 <div class="fip-banner" id="spec-confidence" style="display:none;"></div>
@@ -5067,24 +5180,6 @@
                     <div class="fip-card-title">Boeken</div>
                     <div class="fip-grid">
                         <div class="fip-field">
-                            <label>Factuurnummer</label>
-                            <input type="text" id="spec-invoice" value="">
-                        </div>
-                        <div class="fip-field">
-                            <label>Crediteur</label>
-                            <select id="spec-creditor-select">
-                                <option value="">— kies crediteur —</option>
-                                ${CREDITORS.slice().sort((a, b) => a.name.localeCompare(b.name))
-                                    .map(c => `<option value="${esc(c.seq)}" data-name="${esc(c.name)}">${esc(c.name)} (${esc(c.seq)})</option>`).join('')}
-                            </select>
-                            <div class="fip-hint" id="spec-creditor-hint">Wordt uit de factuur herkend</div>
-                        </div>
-                        <div class="fip-field">
-                            <label>Of handmatig nummer</label>
-                            <input type="text" id="spec-creditor" value="${esc(prefs.creditorSeq || '')}" placeholder="bijv. 71587">
-                            <input type="hidden" id="spec-creditorname" value="${esc(prefs.creditorName || '')}">
-                        </div>
-                        <div class="fip-field">
                             <label>Omschrijving</label>
                             <select id="spec-descmode">
                                 <option value="both" ${(prefs.descMode || 'both') === 'both' ? 'selected' : ''}>Factuur + zending + kostensoort</option>
@@ -5092,6 +5187,7 @@
                                 <option value="invoiceOnly" ${prefs.descMode === 'invoiceOnly' ? 'selected' : ''}>Alleen factuurnummer</option>
                                 <option value="name" ${prefs.descMode === 'name' ? 'selected' : ''}>Alleen kostensoort</option>
                             </select>
+                            <div class="fip-hint">Factuurnummer en crediteur staan per document hierboven.</div>
                         </div>
                     </div>
                     <div class="fip-checklist" style="margin-top:10px;">
@@ -5125,35 +5221,209 @@
         enableModalResize(overlay, 'fiton_modal_size_spec');
 
         const $ = id => document.getElementById(id);
-        let parsed = { transports: [] };
-        let fileImageHashes = [];
-        let lastDocument = null;
-        let selected = -1;
+
+        /* One entry per document read in. Nothing here is shared between them:
+           two invoices from the same carrier still each carry their own number. */
+        let docs = [];
+        let docSeq = 0;
+        let reading = false;
 
         // The shipment reference on the page tells us which container to pick.
         const pageText = (document.body && document.body.innerText) || '';
 
-        function render() {
+        const docTransports = () => docs.reduce((all, d) => all.concat(
+            (d.parsed.transports || []).map(tr => ({ doc: d, tr }))), []);
+        const chosenPairs = () => docTransports().filter(p => p.tr.pick);
+        const docTotal = d => (d.parsed.transports || []).reduce((a, tr) => a + tr.total, 0);
+
+        /* ---------- reading documents ---------- */
+
+        function makeDoc(name, kind, parsed, file) {
+            docSeq++;
+            const d = {
+                id: 'd' + docSeq, name, kind, parsed, file: file || null,
+                invoiceNo: parsed.invoiceNo || '',
+                creditorSeq: parsed.creditor ? parsed.creditor.seq : '',
+                creditorName: parsed.creditor ? parsed.creditor.name : '',
+                creditorHint: parsed.creditor
+                    ? (parsed.creditor.viaKind
+                        ? `Herkend aan ${MARK_LABEL[parsed.creditor.viaKind]}: ${parsed.creditor.name}`
+                        : `Herkend: ${parsed.creditor.name}`)
+                    : ((parsed.marks && parsed.marks.length)
+                        ? 'Niet herkend — kies de crediteur zelf; dezelfde afzender wordt daarna vanzelf herkend'
+                        : 'Niet herkend — kies de crediteur zelf')
+            };
+            /* Is one of these the shipment already open? Then tick just that one;
+               otherwise tick the lot, which is what a stack of notes is for. */
+            const onThisPage = tr => [tr.ref, transportName(tr)].some(v => v && pageText.includes(v));
+            const anyOnPage = (parsed.transports || []).some(onThisPage);
+            (parsed.transports || []).forEach(tr => {
+                tr.onPage = onThisPage(tr);
+                tr.pick = anyOnPage ? tr.onPage : true;
+            });
+            return d;
+        }
+
+        async function addFiles(fileList) {
+            const files = [...(fileList || [])];
+            if (!files.length || reading) return;
+            reading = true;
+            let added = 0, failed = 0;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                $('spec-status').textContent = files.length > 1
+                    ? `${file.name} inlezen… (${i + 1} van ${files.length})`
+                    : `${file.name} inlezen…`;
+                // Same file twice in a stack of drops is a slip, not an intent.
+                if (docs.some(d => d.kind === 'file' && d.name === file.name && d.size === file.size)) continue;
+                try {
+                    const read = await readDroppedFile(file);
+                    const parsed = parseInvoiceRows(read.rows, read.imageHashes || []);
+                    if (!parsed.transports.length) {
+                        docs.push(Object.assign(makeDoc(file.name, 'file', parsed, null),
+                            { size: file.size, error: 'Geen kostenregels herkend in dit document.' }));
+                        failed++;
+                    } else {
+                        const keep = read.bytes && read.bytes.byteLength <= MAX_REPORT_DOC_BYTES
+                            ? { name: file.name, base64: bytesToBase64(read.bytes) } : null;
+                        docs.push(Object.assign(makeDoc(file.name, 'file', parsed, keep), { size: file.size }));
+                        added++;
+                    }
+                } catch (err) {
+                    log('PDF read failed', { file: file.name, error: err.message });
+                    docs.push(Object.assign(makeDoc(file.name, 'file', { transports: [] }, null),
+                        { size: file.size, error: 'Lezen mislukt: ' + err.message }));
+                    failed++;
+                }
+                renderDocs();
+                renderResults();
+            }
+            reading = false;
+            if (failed) {
+                const details = overlay.querySelector('.fip-details');
+                if (details) details.open = true;      // open the paste box as a fallback
+            }
+            renderStatus(added, failed);
+        }
+
+        // Pasted text has no images to go on, and there is only ever one of it.
+        function handleText(text) {
+            const existing = docs.findIndex(d => d.kind === 'text');
+            if (existing >= 0) docs.splice(existing, 1);
+            if (String(text || '').trim()) {
+                const parsed = parseInvoiceRows(rowsFromText(text), []);
+                if (parsed.transports.length) docs.push(makeDoc('geplakte tekst', 'text', parsed, null));
+            }
+            renderDocs();
+            renderResults();
+            renderStatus();
+        }
+
+        function removeDoc(id) {
+            const i = docs.findIndex(d => d.id === id);
+            if (i < 0) return;
+            if (docs[i].kind === 'text') $('spec-text').value = '';
+            docs.splice(i, 1);
+            renderDocs();
+            renderResults();
+            renderStatus();
+        }
+
+        /* ---------- painting ---------- */
+
+        function renderStatus(added, failed) {
+            const good = docs.filter(d => !d.error);
+            if (!docs.length) {
+                $('spec-status').textContent = 'Nog geen factuur ingelezen.';
+                return;
+            }
+            const nLines = good.reduce((n, d) => n + d.parsed.transports.reduce((m, t) => m + t.lines.length, 0), 0);
+            const nTrans = good.reduce((n, d) => n + d.parsed.transports.length, 0);
+            const sum = good.reduce((a, d) => a + docTotal(d), 0);
+            const allExact = good.length && good.every(d => d.parsed.confidence === 'exact');
+            $('spec-status').textContent = good.length
+                ? `${good.length} factu${good.length === 1 ? 'ur' : 'ren'}: ${nLines} kostenregel${nLines === 1 ? '' : 's'}`
+                  + ` over ${nTrans} zending${nTrans === 1 ? '' : 'en'}, samen ${money(sum)}`
+                  + (allExact ? ' — elk totaal klopt met de factuur ✓' : '')
+                  + (failed ? ` · ${failed} niet gelukt` : '')
+                : 'Geen kostenregels herkend.';
+        }
+
+        function docSummary(d) {
+            if (d.error) return `<span class="fip-badge is-bad">niet gelezen</span>`;
+            const n = d.parsed.transports.length;
+            const guessed = d.parsed.transports.reduce((m, t) =>
+                m + t.lines.filter(l => ledgerIsGuess(l.desc) && !l.isTransportRow).length, 0);
+            const bits = [`${n} zending${n === 1 ? '' : 'en'}`, money(docTotal(d))];
+            if (d.parsed.isCredit) bits.push('creditnota');
+            if (d.parsed.skippedVat) bits.push(`btw ${money(d.parsed.skippedVat)} niet geboekt`);
+            if (guessed) bits.push(`${guessed} regel(s) zonder zeker grootboek`);
+            return esc(bits.join(' · ')) + (d.parsed.confidence === 'exact'
+                ? ' <span class="fip-badge is-ok">totaal klopt</span>'
+                : ' <span class="fip-badge is-warn">niet geverifieerd</span>');
+        }
+
+        function renderDocs() {
+            $('spec-doccount').textContent = docs.length;
+            $('spec-docs').innerHTML = docs.map(d => `
+                <div class="fip-doc${d.error ? ' is-bad' : ''}" data-doc="${d.id}">
+                    <div class="fip-doc-head">
+                        <span class="fip-doc-name" title="${esc(d.name)}">${esc(d.name)}</span>
+                        <span class="fip-doc-meta">${docSummary(d)}</span>
+                        <button type="button" class="fip-doc-del" data-del="${d.id}" title="Verwijderen">&times;</button>
+                    </div>
+                    ${d.error ? `<div class="fip-hint">${esc(d.error)}</div>` : `
+                    <div class="fip-doc-fields">
+                        <div class="fip-field">
+                            <label>Factuurnummer</label>
+                            <input type="text" data-inv="${d.id}" value="${esc(d.invoiceNo)}">
+                        </div>
+                        <div class="fip-field">
+                            <label>Crediteur</label>
+                            <select data-cred="${d.id}">
+                                <option value="">— kies crediteur —</option>
+                                ${CREDITOR_OPTIONS}
+                            </select>
+                        </div>
+                        <div class="fip-field">
+                            <label>Of handmatig nummer</label>
+                            <input type="text" data-credseq="${d.id}" value="${esc(d.creditorSeq)}" placeholder="bijv. 71587">
+                        </div>
+                    </div>
+                    <div class="fip-hint" data-credhint="${d.id}">${esc(d.creditorHint)}</div>`}
+                </div>`).join('');
+            docs.forEach(d => {
+                const sel = overlay.querySelector(`[data-cred="${d.id}"]`);
+                if (sel) sel.value = d.creditorSeq || '';
+            });
+        }
+
+        function renderResults() {
+            const pairs = docTransports();
             const t = $('spec-table');
-            if (!parsed.transports.length) {
+            if (!pairs.length) {
                 $('spec-result-card').style.display = 'none';
                 $('spec-submit').disabled = true;
+                $('spec-sel-label').textContent = 'Geen zending gekozen';
+                $('spec-sel-total').textContent = money(0);
+                paintConfidence();
                 return;
             }
             $('spec-result-card').style.display = 'block';
-            $('spec-count').textContent = parsed.transports.length;
+            $('spec-count').textContent = pairs.length;
 
-            t.innerHTML = `
-                <thead><tr>
-                    <th style="width:30px;"><input type="checkbox" id="spec-all-check"
-                        ${parsed.transports.every(x => x.pick) ? 'checked' : ''} title="Alles aan/uit"></th>
-                    <th>Zending</th>
-                    <th>Kosten</th>
-                    <th class="num">Totaal</th>
-                </tr></thead>
-                <tbody>${parsed.transports.map((tr, i) => `
-                    <tr data-i="${i}" class="fip-spec-row ${tr.pick ? 'is-chosen' : ''}">
-                        <td><input type="checkbox" class="spec-pick" data-i="${i}" ${tr.pick ? 'checked' : ''}></td>
+            const many = docs.filter(d => !d.error).length > 1;
+            const body = docs.filter(d => !d.error && d.parsed.transports.length).map(d => {
+                const head = many ? `
+                    <tr class="fip-docgroup">
+                        <td><input type="checkbox" class="spec-doc-check" data-doccheck="${d.id}"
+                            ${d.parsed.transports.every(x => x.pick) ? 'checked' : ''} title="Hele factuur aan/uit"></td>
+                        <td colspan="2"><b>${esc(d.name)}</b>${d.invoiceNo ? ` · factuur ${esc(d.invoiceNo)}` : ''}${d.creditorName ? ` · ${esc(d.creditorName)}` : ''}</td>
+                        <td class="num">${money(docTotal(d))}</td>
+                    </tr>` : '';
+                return head + d.parsed.transports.map((tr, i) => `
+                    <tr data-doc="${d.id}" data-i="${i}" class="fip-spec-row ${tr.pick ? 'is-chosen' : ''}">
+                        <td><input type="checkbox" class="spec-pick" data-doc="${d.id}" data-i="${i}" ${tr.pick ? 'checked' : ''}></td>
                         <td>
                             <div><b>${esc(transportName(tr) || 'onbekend')}</b>${tr.onPage ? ' <span class="fip-tag">deze zending</span>' : ''}</div>
                             ${transportFacts(tr).length ? `<div class="fip-ledger">${esc(transportFacts(tr).join(' · '))}</div>` : ''}
@@ -5171,123 +5441,67 @@
                             }).join('')}
                         </td>
                         <td class="num">${money(tr.total)}</td>
-                    </tr>`).join('')}
-                    <tr class="fip-total"><td colspan="3">Totaal factuur</td><td class="num">${money(parsed.calcTotal)}</td></tr>
+                    </tr>`).join('');
+            }).join('');
+
+            const grandTotal = docs.filter(d => !d.error).reduce((a, d) => a + docTotal(d), 0);
+            t.innerHTML = `
+                <thead><tr>
+                    <th style="width:30px;"><input type="checkbox" id="spec-all-check"
+                        ${pairs.every(p => p.tr.pick) ? 'checked' : ''} title="Alles aan/uit"></th>
+                    <th>Zending</th>
+                    <th>Kosten</th>
+                    <th class="num">Totaal</th>
+                </tr></thead>
+                <tbody>${body}
+                    <tr class="fip-total"><td colspan="3">Totaal ${many ? 'alle facturen' : 'factuur'}</td><td class="num">${money(grandTotal)}</td></tr>
                 </tbody>`;
 
-            const chosen = parsed.transports.filter(x => x.pick);
-            const sum = chosen.reduce((a, x) => a + x.total, 0);
+            refreshFooter();
+            paintConfidence();
+        }
+
+        /* Which chosen documents did not add up to their own stated total. */
+        const unverified = () => [...new Set(chosenPairs().map(p => p.doc))]
+            .filter(d => d.parsed.confidence !== 'exact');
+
+        function refreshFooter() {
+            const chosen = chosenPairs();
+            const pairs = docTransports();
+            const sum = chosen.reduce((a, p) => a + p.tr.total, 0);
+            const nDocs = new Set(chosen.map(p => p.doc.id)).size;
             $('spec-sel-label').textContent = chosen.length
-                ? `${chosen.length} van ${parsed.transports.length} zendingen gekozen`
+                ? `${chosen.length} van ${pairs.length} zendingen gekozen`
+                  + (nDocs > 1 ? `, uit ${nDocs} facturen` : '')
                 : 'Niets geselecteerd';
             $('spec-sel-total').textContent = money(sum);
             $('spec-submit').textContent = chosen.length
                 ? `Boek ${chosen.length} zending${chosen.length === 1 ? '' : 'en'}`
                 : 'Boek selectie';
-            const blocked = parsed.confidence !== 'exact' && !($('spec-override') && $('spec-override').checked);
-            $('spec-submit').disabled = !chosen.length || blocked;
+            const blocked = unverified().length && !($('spec-override') && $('spec-override').checked);
+            $('spec-submit').disabled = !chosen.length || !!blocked;
             if (blocked && chosen.length) $('spec-submit').textContent = 'Controle vereist';
         }
 
         function paintConfidence() {
             const box = $('spec-confidence');
             if (!box) return;
-            if (!parsed.transports.length || parsed.confidence === 'exact') {
+            const bad = unverified();
+            if (!bad.length) {
                 box.style.display = 'none';
                 $('spec-override-wrap').style.display = 'none';
                 return;
             }
             box.style.display = 'flex';
-            box.innerHTML = `<span>⚠</span><div><b>Bedragen niet geverifieerd</b><br>${esc(parsed.note)}<br>
+            const which = bad.length === 1
+                ? esc(bad[0].parsed.note || '')
+                : bad.map(d => `${esc(d.name)}: ${esc(d.parsed.note || '')}`).join('<br>');
+            box.innerHTML = `<span>⚠</span><div><b>Bedragen niet geverifieerd${bad.length > 1 ? ` (${bad.length} facturen)` : ''}</b><br>${which}<br>
                 Controleer elke regel, of gebruik voor rederijfacturen het carriertemplate.</div>`;
             $('spec-override-wrap').style.display = 'block';
         }
 
-        // pasted text has no images to go on
-        function handleText(text) { fileImageHashes = []; handleRows(rowsFromText(text), text); }
-
-        function handleRows(rows, rawText) {
-            const text = rawText !== undefined ? rawText : rows.map(r => r.raw).join('\n');
-            parsed = parseInvoiceRows(rows, fileImageHashes);
-            selected = -1;
-            if (!parsed.transports.length) {
-                $('spec-status').textContent = text.trim()
-                    ? 'Geen kostenregels herkend in dit document.'
-                    : 'Nog niets geplakt.';
-                render();
-                return;
-            }
-            const onThisPage = tr => [tr.ref, transportName(tr)].some(v => v && pageText.includes(v));
-            const anyOnPage = parsed.transports.some(onThisPage);
-            parsed.transports.forEach(tr => {
-                tr.onPage = onThisPage(tr);
-                // If one of them is the shipment already open, tick just that one.
-                // Otherwise tick everything - the usual case is booking the lot.
-                tr.pick = anyOnPage ? tr.onPage : true;
-            });
-            if (parsed.invoiceNo && !$('spec-invoice').value) $('spec-invoice').value = parsed.invoiceNo;
-
-            if (parsed.creditor) {
-                const sel = $('spec-creditor-select');
-                if (sel) sel.value = parsed.creditor.seq;
-                $('spec-creditor').value = parsed.creditor.seq;
-                $('spec-creditorname').value = parsed.creditor.name;
-                $('spec-creditor-hint').textContent = parsed.creditor.viaKind
-                    ? `Herkend aan ${MARK_LABEL[parsed.creditor.viaKind]}: ${parsed.creditor.name}`
-                    : `Herkend: ${parsed.creditor.name}`;
-            } else {
-                /* Clear what the previous invoice left behind: a Maersk number
-                   still sitting here would book this invoice on Maersk. */
-                const sel = $('spec-creditor-select');
-                if (sel) sel.value = '';
-                $('spec-creditor').value = '';
-                $('spec-creditorname').value = '';
-                $('spec-creditor-hint').textContent = (parsed.marks && parsed.marks.length)
-                    ? 'Niet herkend — kies de crediteur zelf; dezelfde afzender wordt daarna vanzelf herkend'
-                    : 'Niet herkend — kies de crediteur zelf';
-            }
-
-            const nLines = parsed.transports.reduce((n, t) => n + t.lines.length, 0);
-            $('spec-status').textContent = `${nLines} ${parsed.isCredit ? 'creditregel' : 'kostenregel'}${nLines === 1 ? '' : 's'} herkend`
-                + (parsed.transports.length > 1 ? ` over ${parsed.transports.length} zendingen` : '')
-                + `, samen ${money(parsed.calcTotal)}`
-                + (parsed.confidence === 'exact' ? ' — klopt met het factuurtotaal ✓' : '');
-
-            const sum = $('spec-summary');
-            if (sum) {
-                const bits = [];
-                if (parsed.creditor) bits.push(`<b>${esc(parsed.creditor.name)}</b>`);
-                if (parsed.invoiceNo) bits.push(`${parsed.isCredit ? 'creditnota' : 'factuur'} ${esc(parsed.invoiceNo)}`);
-                if (parsed.isCredit) bits.push('<b>alle bedragen negatief</b>');
-                if (parsed.skippedVat) bits.push(`btw ${money(parsed.skippedVat)} niet geboekt (0%)`);
-                const guessed = parsed.transports.reduce((n, t) =>
-                    n + t.lines.filter(l => ledgerIsGuess(l.desc) && !l.isTransportRow).length, 0);
-                if (guessed) bits.push(`${guessed} regel(s) zonder zeker grootboek`);
-                sum.innerHTML = bits.join(' · ');
-                sum.style.display = bits.length ? 'block' : 'none';
-            }
-
-            paintConfidence();
-            render();
-        }
-
-        async function takeFile(file) {
-            if (!file) return;
-            $('spec-status').textContent = `${file.name} inlezen…`;
-            try {
-                const doc = await readDroppedFile(file);
-                fileImageHashes = doc.imageHashes || [];
-                lastDocument = doc.bytes && doc.bytes.byteLength <= 4 * 1024 * 1024
-                    ? { name: file.name, base64: bytesToBase64(doc.bytes) } : null;
-                $('spec-text').value = doc.text;
-                handleRows(doc.rows);                 // columns intact
-            } catch (err) {
-                $('spec-status').textContent = 'Lezen mislukt: ' + err.message;
-                log('PDF read failed', { file: file.name, error: err.message });
-                const details = overlay.querySelector('.fip-details');
-                if (details) details.open = true;      // open the paste box as a fallback
-            }
-        }
+        /* ---------- wiring ---------- */
 
         const drop = $('spec-drop');
         ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
@@ -5296,40 +5510,83 @@
         ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
             e.preventDefault(); e.stopPropagation(); drop.classList.remove('is-over');
         }));
-        drop.addEventListener('drop', e => takeFile(e.dataTransfer.files[0]));
-        $('spec-file').addEventListener('change', e => takeFile(e.target.files[0]));
+        drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+        $('spec-file').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
 
-        $('spec-creditor-select').addEventListener('change', e => {
+        // Per-document fields: typed into, never re-rendered under the cursor.
+        overlay.addEventListener('input', e => {
+            const inv = e.target.getAttribute && e.target.getAttribute('data-inv');
+            if (inv) {
+                const d = docs.find(x => x.id === inv);
+                if (d) { d.invoiceNo = e.target.value.trim(); renderResults(); }
+                return;
+            }
+            const seq = e.target.getAttribute && e.target.getAttribute('data-credseq');
+            if (seq) {
+                const d = docs.find(x => x.id === seq);
+                if (!d) return;
+                d.creditorSeq = e.target.value.trim();
+                const known = CREDITORS.find(c => String(c.seq) === d.creditorSeq);
+                d.creditorName = known ? known.name : '';
+                const sel = overlay.querySelector(`[data-cred="${d.id}"]`);
+                if (sel) sel.value = known ? String(known.seq) : '';
+                renderResults();
+            }
+        });
+
+        overlay.addEventListener('change', e => {
+            const cred = e.target.getAttribute && e.target.getAttribute('data-cred');
+            if (!cred) return;
+            const d = docs.find(x => x.id === cred);
+            if (!d) return;
             const opt = e.target.selectedOptions[0];
-            $('spec-creditor').value = e.target.value || '';
-            $('spec-creditorname').value = (opt && opt.getAttribute('data-name')) || '';
+            d.creditorSeq = e.target.value || '';
+            d.creditorName = (opt && opt.getAttribute('data-name')) || '';
+            const manual = overlay.querySelector(`[data-credseq="${d.id}"]`);
+            if (manual) manual.value = d.creditorSeq;
+            const hint = overlay.querySelector(`[data-credhint="${d.id}"]`);
+            if (hint && d.creditorName) hint.textContent = `Gekozen: ${d.creditorName}`;
+            renderResults();
         });
 
         $('spec-text').addEventListener('input', e => handleText(e.target.value));
         $('spec-text').addEventListener('paste', () => setTimeout(() => handleText($('spec-text').value), 0));
 
         overlay.addEventListener('click', e => {
-            if (e.target.id === 'spec-override') { render(); return; }
+            const del = e.target.getAttribute && e.target.getAttribute('data-del');
+            if (del) { removeDoc(del); return; }
+            if (e.target.id === 'spec-override') { refreshFooter(); return; }
             if (e.target.id === 'spec-all-check') {
                 const on = e.target.checked;
-                parsed.transports.forEach(tr => { tr.pick = on; });
-                render();
+                docTransports().forEach(p => { p.tr.pick = on; });
+                renderResults();
+                return;
+            }
+            const docCheck = e.target.getAttribute && e.target.getAttribute('data-doccheck');
+            if (docCheck) {
+                const d = docs.find(x => x.id === docCheck);
+                if (d) d.parsed.transports.forEach(tr => { tr.pick = e.target.checked; });
+                renderResults();
                 return;
             }
             const row = e.target.closest('.fip-spec-row');
             if (!row) return;
-            const i = parseInt(row.getAttribute('data-i'), 10);
-            const tr = parsed.transports[i];
+            const d = docs.find(x => x.id === row.getAttribute('data-doc'));
+            const tr = d && d.parsed.transports[parseInt(row.getAttribute('data-i'), 10)];
             if (!tr) return;
             // a click anywhere on the row toggles it; the checkbox handles itself
             tr.pick = e.target.classList && e.target.classList.contains('spec-pick')
                 ? e.target.checked : !tr.pick;
-            render();
+            renderResults();
         });
 
         $('spec-copy').addEventListener('click', () => {
-            const tsv = ['Zending\tDetails\tRegels\tBedrag'].concat(parsed.transports.map(t =>
-                [transportName(t), transportFacts(t).join(' · '), t.lines.length, t.total.toFixed(2).replace('.', ',')].join('\t'))).join('\n');
+            const many = docs.filter(d => !d.error).length > 1;
+            const head = (many ? 'Factuur\tBestand\t' : '') + 'Zending\tDetails\tRegels\tBedrag';
+            const tsv = [head].concat(docTransports().map(({ doc, tr }) =>
+                (many ? [doc.invoiceNo, doc.name] : []).concat([
+                    transportName(tr), transportFacts(tr).join(' · '), tr.lines.length,
+                    tr.total.toFixed(2).replace('.', ',')]).join('\t'))).join('\n');
             navigator.clipboard.writeText(tsv).then(() => {
                 $('spec-copy').textContent = 'Gekopieerd ✓';
                 setTimeout(() => { $('spec-copy').textContent = 'Overzicht kopiëren'; }, 1600);
@@ -5348,73 +5605,115 @@
         function collectOptions() {
             const combineEl = overlay.querySelector('input[name="spec-combine"]:checked');
             return {
-                invoiceNo: $('spec-invoice').value.trim(),
-                creditorSeq: $('spec-creditor').value.trim(),
-                creditorName: $('spec-creditorname').value.trim(),
                 descMode: $('spec-descmode').value,
                 combine: combineEl && combineEl.value === 'combine',
                 ignoreExisting: !!($('spec-ignore-existing') && $('spec-ignore-existing').checked)
             };
         }
 
-        async function startWorklist(list, opts) {
+        async function startWorklist(pairs, opts) {
+            const used = [...new Set(pairs.map(p => p.doc))];
             // Learn only from a creditor that was actually booked on.
-            learnCreditorMarks(parsed.marks, opts.creditorSeq, opts.creditorName);
+            used.forEach(d => learnCreditorMarks(d.parsed.marks, d.creditorSeq, d.creditorName));
+
+            const first = used[0];
             REPORT_CONTEXT = {
-                invoiceNo: opts.invoiceNo || parsed.invoiceNo || '',
-                creditor: opts.creditorName || (parsed.creditor && parsed.creditor.name) || '',
-                creditorSeq: opts.creditorSeq || '',
-                amount: parsed.calcTotal,
-                document: lastDocument
+                invoiceNo: first ? first.invoiceNo : '',
+                creditor: first ? first.creditorName : '',
+                creditorSeq: first ? first.creditorSeq : '',
+                amount: pairs.reduce((a, p) => a + p.tr.total, 0),
+                document: first ? first.file : null
             };
-            if (!opts.creditorSeq) {
+            const without = used.filter(d => !d.creditorSeq);
+            if (without.length) {
                 const go = await fipAsk({
                     title: 'Geen crediteur',
-                    message: 'Er is geen crediteurnummer ingevuld, dus de crediteur wordt niet automatisch gezet.\n\nToch doorgaan?',
+                    message: (without.length === used.length
+                        ? 'Er is geen crediteurnummer ingevuld, dus de crediteur wordt niet automatisch gezet.'
+                        : `Bij ${without.length} van de ${used.length} facturen is geen crediteurnummer ingevuld`
+                          + ` (${without.map(d => d.name).join(', ')}), dus daar wordt de crediteur niet automatisch gezet.`)
+                        + '\n\nToch doorgaan?',
                     okLabel: 'Doorgaan', cancelLabel: 'Terug'
                 });
                 if (!go) return false;
             }
             localStorage.setItem('fiton_spec_prefs', JSON.stringify({
-                creditorSeq: opts.creditorSeq, creditorName: opts.creditorName,
                 descMode: opts.descMode, combine: opts.combine
             }));
             saveWorklist({
                 running: true, index: 0, attempts: 0,
-                invoiceNo: opts.invoiceNo, creditorSeq: opts.creditorSeq, creditorName: opts.creditorName,
+                // Kept for a report or a resume that still reads the old fields.
+                invoiceNo: first ? first.invoiceNo : '',
+                creditorSeq: first ? first.creditorSeq : '',
+                creditorName: first ? first.creditorName : '',
+                creditor: first ? first.creditorName : '',
+                fileName: first ? first.name : '',
+                confidence: first ? first.parsed.confidence : '',
+                statedTotal: first ? first.parsed.statedTotal : null,
+                amount: used.length === 1 ? (first ? first.parsed.calcTotal : null) : REPORT_CONTEXT.amount,
                 descMode: opts.descMode, combine: opts.combine,
                 searchUrl: location.href,
-                creditor: REPORT_CONTEXT.creditor, amount: REPORT_CONTEXT.amount,   // for the dashboard report
-                user: fitonUser(), startedAt: Date.now(), fileName: (lastDocument && lastDocument.name) || '',
-                confidence: parsed.confidence, statedTotal: parsed.statedTotal,
+                user: fitonUser(), startedAt: Date.now(),
                 ignoreExisting: !!opts.ignoreExisting,
-                items: list.map(t => Object.assign({}, t, { status: 'pending' }))
+                /* What was read per document, so the end report can go out one
+                   row per invoice however many went in at once. */
+                docs: used.map(d => ({
+                    docId: d.id, docName: d.name, invoiceNo: d.invoiceNo,
+                    creditorSeq: d.creditorSeq, creditorName: d.creditorName,
+                    amount: d.parsed.calcTotal, statedTotal: d.parsed.statedTotal != null ? d.parsed.statedTotal : null,
+                    confidence: d.parsed.confidence || ''
+                })),
+                items: pairs.map(({ doc, tr }) => Object.assign({}, tr, {
+                    status: 'pending',
+                    docId: doc.id, docName: doc.name,
+                    invoiceNo: doc.invoiceNo, creditorSeq: doc.creditorSeq, creditorName: doc.creditorName
+                }))
             });
-            // The PDF does not survive the page loads ahead; keep it for the report at the end.
-            chrome.storage.local.set({ [REPORT_DOC_KEY]: lastDocument || null }).catch(() => {});
+            /* The PDFs do not survive the page loads ahead; keep them for the
+               reports at the end, largest first out if it gets out of hand. */
+            let budget = MAX_REPORT_DOC_TOTAL;
+            const keep = [];
+            used.forEach(d => {
+                if (!d.file) return;
+                const size = d.file.base64.length;
+                if (size > budget) return;
+                budget -= size;
+                keep.push({ docId: d.id, name: d.file.name, base64: d.file.base64 });
+            });
+            chrome.storage.local.set({ [REPORT_DOC_KEY]: keep }).catch(() => {});
             close();
             runWorklist();
             return true;
         }
 
         $('spec-submit').addEventListener('click', async () => {
-            const chosen = parsed.transports.filter(t => t.pick);
+            const chosen = chosenPairs();
             if (!chosen.length) return;
             const opts = collectOptions();
-            const totalLines = chosen.reduce((n, t) => n + (opts.combine ? 1 : t.lines.length), 0);
-            const sum = chosen.reduce((a, t) => a + t.total, 0);
+            const used = [...new Set(chosen.map(p => p.doc))];
+            const totalLines = chosen.reduce((n, p) => n + (opts.combine ? 1 : p.tr.lines.length), 0);
+            const sum = chosen.reduce((a, p) => a + p.tr.total, 0);
 
-            const descNote = opts.descMode === 'invoiceOnly' && !opts.invoiceNo
-                ? 'Let op: geen factuurnummer ingevuld — de omschrijving wordt dan de kostensoort.\n\n' : '';
-            const unnamed = chosen.filter(t => !transportName(t)).length;
+            const noNumber = used.filter(d => !d.invoiceNo).length;
+            const descNote = opts.descMode === 'invoiceOnly' && noNumber
+                ? `Let op: ${noNumber === used.length ? 'geen factuurnummer' : `${noNumber} factu${noNumber === 1 ? 'ur' : 'ren'} zonder nummer`}`
+                  + ' — de omschrijving wordt dan de kostensoort.\n\n' : '';
+            const unnamed = chosen.filter(p => !transportName(p.tr)).length;
             const unnamedNote = unnamed
                 ? `Let op: ${unnamed} zending${unnamed === 1 ? '' : 'en'} zonder container, eenheid of referentie kan niet worden opgezocht en wordt als niet gevonden gemeld.\n\n` : '';
+            /* With one invoice the containers themselves are the useful list;
+               with a stack of them it is the invoices. */
+            const what = used.length === 1
+                ? chosen.map(p => transportName(p.tr) || '?').join(', ')
+                : used.map(d => `${d.invoiceNo || d.name}: ${chosen.filter(p => p.doc === d).length} zending(en)`).join('\n');
             const go = await fipAsk({
-                title: chosen.length === 1 ? 'Eén zending boeken' : `${chosen.length} zendingen boeken`,
-                message: `${chosen.map(t => transportName(t) || '?').join(', ')}\n\n`
+                title: used.length > 1
+                    ? `${chosen.length} zendingen uit ${used.length} facturen boeken`
+                    : chosen.length === 1 ? 'Eén zending boeken' : `${chosen.length} zendingen boeken`,
+                message: `${what}\n\n`
                        + `Samen ${money(sum)} in ${totalLines} regel${totalLines === 1 ? '' : 's'}.\n\n`
                        + descNote + unnamedNote
-                       + 'Elke zending wordt apart opgezocht en op het eigen dossier geboekt. '
+                       + 'Elke zending wordt apart opgezocht en op het eigen dossier geboekt, met het factuurnummer en de crediteur van de factuur waar hij op stond. '
                        + 'Laat dit tabblad open staan.\n\nStarten?',
                 okLabel: 'Starten', cancelLabel: 'Annuleren'
             });
@@ -5422,6 +5721,7 @@
             startWorklist(chosen, opts);
         });
 
+        renderDocs();
         $('spec-text').focus();
     }
 
@@ -6381,7 +6681,7 @@
                 </button>
                 <button class="fip-btn fip-btn-ghost fip-btn-block fip-btn-sm" id="resume-btn" style="margin-top:6px; display:none;">Hervatten</button>
                 <button class="fip-btn fip-btn-danger fip-btn-block fip-btn-sm" id="stop-template-btn" style="margin-top:6px;">Stop &amp; herlaad</button>
-                <button class="fip-btn fip-btn-ghost fip-btn-block fip-btn-sm" id="spec-import-btn" style="margin-top:6px; display:none;">Factuur inlezen</button>
+                <button class="fip-btn fip-btn-ghost fip-btn-block fip-btn-sm" id="spec-import-btn" style="margin-top:6px; display:none;">Facturen inlezen</button>
                 <button class="fip-btn fip-btn-ghost fip-btn-block fip-btn-sm" id="report-btn" style="margin-top:6px; display:none;">Laatste rapport</button>
                 <button class="fip-btn fip-btn-ghost fip-btn-block fip-btn-sm" id="cred-refresh-btn" style="margin-top:6px; display:none;">Crediteuren verversen</button>
                 <button class="fip-btn fip-btn-ghost fip-btn-block fip-btn-sm" id="learn-fields-btn" style="margin-top:6px;">Velden leren</button>
@@ -6805,7 +7105,7 @@
                     `FitOn Invoice Automation v${VERSION}`,
                     '',
                     '  fiton.info()          welke pagina, welke velden, welke knoppen',
-                    '  fiton.readFile()      kies een factuur en zie wat eruit komt',
+                    '  fiton.readFile()      kies één of meer facturen en zie wat eruit komt',
                     '  fiton.readText(`…`)   idem voor geplakte tekst',
                     '  fiton.rows()          de gelezen regels met posities',
                     '  fiton.parsed()        het laatste leesresultaat',
@@ -6855,29 +7155,53 @@
                 return r;
             },
 
+            /* One file, or a stack of them: with several, each gets a line of
+               its own and the last one stays loaded for fiton.rows(). */
             readFile: () => new Promise(resolve => {
                 const input = document.createElement('input');
                 input.type = 'file';
                 input.accept = '.pdf,.txt';
+                input.multiple = true;
                 input.onchange = async () => {
-                    const file = input.files[0];
-                    if (!file) { const r = out(); r.logs.push('Geen bestand gekozen.'); return resolve(r); }
-                    try {
-                        const doc = await readDroppedFile(file);
-                        lastRows = doc.rows;
-                        lastParsed = parseInvoiceRows(doc.rows);
-                        const r = describe(lastParsed);
-                        r.logs.unshift(`${file.name}: ${doc.rows.length} regels gelezen`);
-                        resolve(r);
-                    } catch (e) {
-                        const r = out();
-                        r.logs.push(`Lezen mislukt: ${e.message}`);
-                        resolve(r);
+                    const files = [...input.files];
+                    if (!files.length) { const r = out(); r.logs.push('Geen bestand gekozen.'); return resolve(r); }
+                    if (files.length === 1) {
+                        const file = files[0];
+                        try {
+                            const doc = await readDroppedFile(file);
+                            lastRows = doc.rows;
+                            lastParsed = parseInvoiceRows(doc.rows, doc.imageHashes || []);
+                            const r = describe(lastParsed);
+                            r.logs.unshift(`${file.name}: ${doc.rows.length} regels gelezen`);
+                            return resolve(r);
+                        } catch (e) {
+                            const r = out();
+                            r.logs.push(`Lezen mislukt: ${e.message}`);
+                            return resolve(r);
+                        }
                     }
+                    const r = out();
+                    r.logs.push(`${files.length} bestanden:`);
+                    for (const file of files) {
+                        try {
+                            const doc = await readDroppedFile(file);
+                            const parsed = parseInvoiceRows(doc.rows, doc.imageHashes || []);
+                            lastRows = doc.rows;
+                            lastParsed = parsed;
+                            r.logs.push(`  ${file.name}: ${parsed.transports.length} zending(en), `
+                                + `${parsed.transports.reduce((n, t) => n + t.lines.length, 0)} regels, `
+                                + `${money(parsed.calcTotal)}, factuur ${parsed.invoiceNo || '-'}, `
+                                + `${parsed.creditor ? parsed.creditor.name : 'crediteur onbekend'}`
+                                + `${parsed.confidence === 'exact' ? ' ✓' : ' (totaal niet geverifieerd)'}`);
+                        } catch (e) {
+                            r.logs.push(`  ${file.name}: lezen mislukt — ${e.message}`);
+                        }
+                    }
+                    resolve(r);
                 };
                 input.click();
                 const r = out();
-                r.logs.push('Kies een bestand in het venster…');
+                r.logs.push('Kies één of meer bestanden in het venster…');
                 // the picker resolves later; this keeps the console responsive
             }),
 
