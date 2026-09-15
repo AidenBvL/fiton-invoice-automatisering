@@ -1325,7 +1325,8 @@
             padding: 10px 0 12px; border-bottom: 1px solid var(--fip-border); margin-bottom: 10px;
         }
         .fip-report-summary b { color: var(--fip-text); font-size: 14px; }
-        .fip-report-scroll { max-height: 45vh; overflow-y: auto; }
+        /* Sideways too: the shipment column makes this table wider than the box. */
+        .fip-report-scroll { max-height: 45vh; overflow: auto; }
         .fip-badge { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
         .fip-badge.is-ok { background: #f0fdf4; color: #166534; }
         .fip-badge.is-warn { background: var(--fip-warn-bg); color: var(--fip-warn-text); }
@@ -2417,6 +2418,28 @@
         return !!page && (pageList('costs').includes(page) || pageList('financials').includes(page));
     }
 
+    /* The number of the shipment a cost is being booked on, as FitOn shows it
+       on the shipment page: P606_BOOKING_NO_DISPLAY on a sea or air shipment,
+       P3701_BOOKING_NO_DISPLAY on a road one. An invoice names a container or a
+       B/L and never this number, so unless it is read here while we are on the
+       page, the end report cannot say which dossier a line ended up on. Other
+       page numbers carry the same field under their own prefix, so those are
+       tried too rather than guessed at. */
+    const BOOKING_NO_IDS = ['P606_BOOKING_NO_DISPLAY', 'P3701_BOOKING_NO_DISPLAY'];
+
+    function shipmentNoOnPage() {
+        const value = el => (el && (el.textContent || '').trim()) || '';
+        for (const id of BOOKING_NO_IDS) {
+            const v = value(document.getElementById(id));
+            if (isShipmentId(v)) return v;
+        }
+        for (const el of document.querySelectorAll('[id$="_BOOKING_NO_DISPLAY"]')) {
+            const v = value(el);
+            if (isShipmentId(v)) return v;
+        }
+        return '';
+    }
+
     /* Only on a Financials page itself, so a sea shipment that has not finished
        drawing its Costs region is never sent somewhere else. */
     function findFinancialsButton() {
@@ -2517,6 +2540,7 @@
             return `<tr>
                 ${many ? `<td><b>${esc(inv.invoiceNo || '—')}</b>${inv.creditorName ? `<div class="fip-ledger">${esc(inv.creditorName)}</div>` : ''}</td>` : ''}
                 <td><b>${esc(transportName(i) || '—')}</b>${facts.length ? `<div class="fip-ledger">${esc(facts.join(' · '))}</div>` : ''}</td>
+                <td>${i.shipmentNo ? `<b>${esc(i.shipmentNo)}</b>` : '<span class="fip-ledger">—</span>'}</td>
                 <td class="fip-reason">${names.length ? esc(names.slice(0, 3).join(', ')) + (names.length > 3 ? ` +${names.length - 3}` : '') : '—'}</td>
                 <td class="num">${lineCount(i)}</td>
                 <td class="num">${money(i.total)}</td>
@@ -2543,7 +2567,7 @@
                 </div>
                 <div class="fip-report-scroll">
                     <table class="fip-table">
-                        <thead><tr>${many ? '<th>Factuur</th>' : ''}<th>Zending</th><th>Kosten</th><th class="num">Regels</th><th class="num">Bedrag</th><th>Resultaat</th><th>Reden</th></tr></thead>
+                        <thead><tr>${many ? '<th>Factuur</th>' : ''}<th>Zending</th><th>Shipment</th><th>Kosten</th><th class="num">Regels</th><th class="num">Bedrag</th><th>Resultaat</th><th>Reden</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
@@ -2561,11 +2585,11 @@
             if (act && act.act === 'copy') {
                 const unitOf = i => i.container ? 'Container' : i.unit && UNIT_KINDS[i.unit.kind] ? UNIT_KINDS[i.unit.kind].label : '';
                 const tsv = [(many ? 'Factuur\tCrediteur\t' : '')
-                        + 'Zending\tEenheid\tSoort vervoer\tReferentie\tKosten\tRegels\tBedrag\tResultaat\tReden']
+                        + 'Zending\tShipment\tEenheid\tSoort vervoer\tReferentie\tKosten\tRegels\tBedrag\tResultaat\tReden']
                     .concat(w.items.map(i => {
                         const inv = itemInvoice(w, i);
                         return (many ? [inv.invoiceNo, inv.creditorName] : []).concat([
-                            transportName(i), unitOf(i), MODALITY[modalityOf(i, i.modality)] || '',
+                            transportName(i), i.shipmentNo || '', unitOf(i), MODALITY[modalityOf(i, i.modality)] || '',
                             i.ref || '', chargeNames(i).join(', '), lineCount(i),
                             i.total.toFixed(2).replace('.', ','),
                             (LABEL[i.status] || LABEL.pending).text, i.reason || '']).join('\t');
@@ -2730,10 +2754,12 @@
         setStatus(`Container ${w.index + 1} van ${w.items.length}`, 'running', pct);
         setSubStatus(`${transportName(item) || '?'} · ${money(item.total)}`);
 
-        /* STEP 1 - Search: look the shipment up. By container when the invoice
-           names one, otherwise by the reference it quotes - a trucker invoice
-           often carries only the dossier number. */
+        /* STEP 1 - Search: look the shipment up. Forwarding > Search is used on
+           the container number or the B/L, so those come first; the rest is what
+           is left to try when an invoice names neither - a trucker invoice often
+           carries only the dossier number. */
         const searchBy = item.container ? 'container'
+                       : item.unit && item.unit.kind === 'bl' ? 'unit'
                        : isShipmentId(item.ref) ? 'shipment'
                        : item.ref ? 'ref'
                        : item.unit ? 'unit' : null;       // waybill, trailer, wagon...
@@ -2836,6 +2862,10 @@
         /* STEP 2 - Shipment: press Create in the Costs region. A road shipment
            has no Costs region on its own page, so open Financials first. */
         if (onShipmentPage()) {
+            if (!item.shipmentNo) {
+                const no = shipmentNoOnPage();
+                if (no) { item.shipmentNo = no; saveWorklist(w); log(`${who} is shipment ${no}`); }
+            }
             // Before anything is created: are these costs on the shipment already?
             if (!w.ignoreExisting && findRegionCreateButton('cost')) {
                 if (document.readyState !== 'complete') return;          // let the Costs rows render
@@ -3521,7 +3551,9 @@
                     message: `${groupBooked} van de ${items.length} zendingen geboekt`,
                     invoiceNo: group.invoiceNo || '', creditor: group.creditorName || '',
                     creditorSeq: group.creditorSeq || '',
-                    shipment: [...new Set(items.map(i => i.ref).filter(Boolean))].join(', ').slice(0, 200),
+                    // the dossier it was actually booked on, or the invoice's own
+                    // reference while that is all we have
+                    shipment: [...new Set(items.map(i => i.shipmentNo || i.ref).filter(Boolean))].join(', ').slice(0, 200),
                     container: [...new Set(items.map(i => i.container || (i.unit && i.unit.value)).filter(Boolean))].join(', ').slice(0, 200),
                     lines: items.length, booked: groupBooked,
                     amount: group.amount != null ? group.amount
@@ -3535,6 +3567,7 @@
                     // The whole picture per transport, for the dashboard's detail view.
                     transports: items.map(i => ({
                         name: transportName(i), facts: transportFacts(i), status: i.status, reason: i.reason || '',
+                        shipmentNo: i.shipmentNo || '',
                         total: i.total, bookedLines: i.bookedLines || null,
                         lines: (i.lines || []).map(l => {
                             const led = ledgerForSpecLine(l.desc, l);
@@ -4244,7 +4277,12 @@
     }
 
     // CGMU 803082/7, OERU-422507-2 and OERU4225072 are all one way of writing a box
-    const CONTAINER_ANY = /\b([A-Z]{4})[- ]?(\d{6,7})[- \/]?(\d?)\b/;
+    /* The owner code can come out of a PDF with spaces in it: MSC prints
+       SZLU9491905 and the text layer hands us "SZ LU 9491905", which then does
+       not read as a container at all - so nothing is looked up and the shipment
+       is never found. The letters are allowed to be spaced apart here and the
+       spaces are dropped before the number is checked. */
+    const CONTAINER_ANY = /\b([A-Z](?:[ ]?[A-Z]){3})[- ]?(\d{6,7})[- \/]?(\d?)\b/;
     /* ISO 6346: the fourth letter is the equipment category - U, J or Z. That
        keeps an invoice number such as NLIC0126788 (four letters, seven digits)
        from being taken for a container and opening a group of its own. */
@@ -4287,7 +4325,7 @@
         const s = String(text || '');
         const cm = CONTAINER_ANY.exec(s);
         if (cm) {
-            const c = (cm[1] + cm[2] + (cm[3] || '')).toUpperCase();
+            const c = (cm[1] + cm[2] + (cm[3] || '')).replace(/\s+/g, '').toUpperCase();
             if (isContainerNo(c)) return { kind: 'container', value: c, text: cm[0] };
         }
         for (const u of LABELLED_UNITS) {
@@ -4701,8 +4739,13 @@
        is - 1002... sea freight, 2002... road, 3002... air. All three are found
        under "Shipment id" on the Search page. 4003... is an invoice file and is
        not a shipment, so it is not taken. */
-    const SHIPMENT_ID_RE = /\b([123]00\d{7})\b/g;
-    const isShipmentId = v => /^[123]00\d{7}$/.test(String(v || ''));
+    /* A cost is always booked on a shipment whose number starts 1002 (sea and
+       air), 2002 (road) or 3002. Accepting 100 followed by anything took MSC's
+       customer number 1001467713 for a shipment id on every one of their
+       invoices, so every one of them was looked up under a number FitOn does
+       not have. */
+    const SHIPMENT_ID_RE = /\b([123]002\d{6})\b/g;
+    const isShipmentId = v => /^[123]002\d{6}$/.test(String(v || ''));
     const SHIPMENT_MODALITY = { 1: 'sea', 2: 'road', 3: 'air' };
     const MODALITY = { sea: 'Zeevracht', road: 'Wegtransport', rail: 'Spoortransport', air: 'Luchtvracht' };
 
