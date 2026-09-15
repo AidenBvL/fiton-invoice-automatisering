@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Self-hosted auto-update manifest.
+  Host this file at the exact URL in manifest.json "update_url".
+  Chrome checks it about every 5 hours; when the version here is higher than
+  the installed one, it downloads the CRX and updates silently.
+
+  Replace:
+    EXTENSION_ID_HERE  - the id Chrome assigns (see README, step 3)
+    the two URLs       - wherever you host updates.xml and the .crx
+    version            - must match manifest.json exactly, and must increase
+-->
+<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+  <app appid="EXTENSION_ID_HERE">
+    <updatecheck codebase="https://REPLACE-ME.example.com/fiton/fiton-invoice-9.19.0.crx"
+                 version="9.19.0" />
+  </app>
+</gupdate>

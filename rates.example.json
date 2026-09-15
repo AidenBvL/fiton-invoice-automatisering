@@ -1,0 +1,23 @@
+{
+  "version": "2026-09-10",
+  "updatedAt": "2026-09-10T12:00:00Z",
+  "note": "Carrier arrival charges into Rotterdam, EUR excl. VAT, per container type. Seeded from actual invoices (see source). Host on an internal https path and paste the URL in the extension settings. Only carrierRates is read.",
+  "source": {
+    "hapag": "invoice 2512134858, 08-09-2026, Buenos Aires, 40' HC reefer, total 495.00",
+    "msc": "invoice NL260903808I, 02-09-2026, Rio Grande, 40HR, total 441.00",
+    "yangming": "invoice 1416801, 01-09-2026, Ningbo, reefer, total 507.00",
+    "oocl": "invoice 513 26688DH, 11-08-2026, Dalian, 40RQ, total 405.00",
+    "cmacgm": "invoice NLIC0125218, 09-09-2026, Santos, 40RH, total 485.00",
+    "maersk": "invoice 7556325038, 09-09-2026, Paita, 40/9'6 REEF, total 463.00",
+    "one": "invoice 310020202520, 09-08-2026, Chittagong, 1x40', total 473.00"
+  },
+  "carrierRates": {
+    "hapag":    { "40RF": { "thc": 370.00, "admin": 65.00, "security": 30.00, "equipment": 30.00 } },
+    "msc":      { "40RF": { "thc": 335.00, "importfee": 58.00, "security": 25.00, "inspection": 23.00 } },
+    "yangming": { "40RF": { "thc": 325.00, "importfee": 75.00, "isps": 17.00, "pluginfee": 60.00, "inspection": 30.00 } },
+    "oocl":     { "40RF": { "thc": 355.00, "docfee": 50.00 } },
+    "cmacgm":   { "40RF": { "thc": 350.00, "docfee": 50.00, "equipment": 40.00, "inspection": 45.00 } },
+    "maersk":   { "40RF": { "thc": 385.00, "docfee": 50.00, "protect": 28.00 } },
+    "one":      { "40RF": { "thc": 370.00, "docfee": 56.00, "security": 20.00, "equipment": 27.00 } }
+  }
+}

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>FitOn Invoice Automation — instellingen</title>
+<style>
+  :root {
+    --bg:#f8fafc; --surface:#fff; --border:#e2e8f0; --text:#0f172a;
+    --muted:#64748b; --accent:#1d4ed8; --accent-soft:#eff6ff; --danger:#b91c1c; --ok:#15803d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; padding:34px 24px; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; letter-spacing:-.02em; }
+  .sub { color:var(--muted); font-size:12.5px; margin-bottom:24px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px 20px; margin-bottom:16px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input[type=text], select {
+    width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px;
+    font:inherit; font-size:13px; background:#fff; color:var(--text);
+  }
+  input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(29,78,216,.12); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .row { margin-bottom:12px; }
+  .hint { font-size:11.5px; color:var(--muted); margin-top:5px; }
+  button {
+    border:1px solid transparent; border-radius:6px; padding:9px 15px; cursor:pointer;
+    font:inherit; font-size:13px; font-weight:600;
+  }
+  .primary { background:var(--accent); color:#fff; }
+  .ghost { background:#fff; color:var(--text); border-color:#cbd5e1; }
+  .danger { background:#fff; color:var(--danger); border-color:#fecaca; }
+  .bar { display:flex; gap:10px; align-items:center; }
+  .status { font-size:12.5px; margin-left:auto; }
+  .status.ok { color:var(--ok); }
+  .status.err { color:var(--danger); }
+  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  .badge.warn { background:#fffbeb; color:#92400e; }
+  ol { margin:8px 0 0 18px; padding:0; font-size:12.5px; color:var(--muted); }
+  ol li { margin-bottom:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FitOn Invoice Automation</h1>
+  <div class="sub">Versie <span id="version">–</span> · instellingen worden gedeeld over al je apparaten waar je in Chrome bent aangemeld.</div>
+
+  <div class="card" id="first-run" style="display:none;">
+    <h2>Eerste keer instellen</h2>
+    <ol>
+      <li>Open FitOnPortal en ga naar een <b>Revenue</b>- of <b>Cost</b>-regel. Het paneel verschijnt rechtsonder.</li>
+      <li>Beide pagina's zijn al ingesteld — je hoeft hier niets in te vullen.</li>
+      <li>Verandert FitOn de pagina's? Dan corrigeer je de veldnamen hieronder, of klik je "Velden leren" in het paneel.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Standaard tabblad</h2>
+    <div class="row" style="max-width:260px;">
+      <label for="defaultMode">Waarmee begint het paneel</label>
+      <select id="defaultMode">
+        <option value="revenue">Omzet</option>
+        <option value="cost">Kosten</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Veldnamen omzetpagina · zee- en luchtvracht <span class="badge" id="rev-state">standaard</span></h2>
+    <div class="grid" id="rev-fields"></div>
+    <div class="hint">Deze staan standaard goed. Pas ze alleen aan als FitOn de pagina verandert.</div>
+  </div>
+
+  <div class="card">
+    <h2>Veldnamen kostenpagina · zee- en luchtvracht <span class="badge" id="cost-state">ingesteld</span></h2>
+    <div class="grid" id="cost-fields"></div>
+    <div class="hint">Deze staan standaard goed (pagina P673). De extensie herkent de pagina ook zelf aan het paginanummer, dus meestal hoeft hier niets te wijzigen. Klopt er iets niet? Klik "Velden leren" in het paneel.</div>
+  </div>
+
+  <div class="card">
+    <h2>Veldnamen omzetpagina · wegtransport <span class="badge" id="revroad-state">standaard</span></h2>
+    <div class="grid" id="revroad-fields"></div>
+    <div class="hint">Het paginanummer hiervan is nog niet bekend, dus deze velden zijn leeg: de extensie zoekt ze zelf op zodra het nummer bij "Formulierpagina's wegtransport" hieronder staat.</div>
+  </div>
+
+  <div class="card">
+    <h2>Veldnamen kostenpagina · wegtransport <span class="badge" id="costroad-state">standaard</span></h2>
+    <div class="grid" id="costroad-fields"></div>
+    <div class="hint">Deze staan standaard goed (pagina P3708: wegzending &gt; Financials &gt; Costs &gt; Create). De knoppen worden op hun tekst gevonden. "Velden leren" op deze pagina slaat hier op, niet bij zee- en luchtvracht.</div>
+  </div>
+
+  <div class="card">
+    <h2>Zendingspagina's</h2>
+    <div class="grid">
+      <div class="row">
+        <label for="pagesCosts">Pagina's met het blok Kosten</label>
+        <input type="text" id="pagesCosts" placeholder="606, 3706">
+        <div class="hint">606 = zending zee- en luchtvracht, 3706 = Financials van een wegzending.</div>
+      </div>
+      <div class="row">
+        <label for="pagesFinancials">Pagina's waar eerst op Financials geklikt wordt</label>
+        <input type="text" id="pagesFinancials" placeholder="3701">
+        <div class="hint">3701 = wegzending (shipment id 2002…).</div>
+      </div>
+      <div class="row">
+        <label for="pagesRoadForms">Formulierpagina's wegtransport</label>
+        <input type="text" id="pagesRoadForms" placeholder="3708">
+        <div class="hint">3708 = kostenregel. Hier gelden de veldnamen voor wegtransport; voeg de omzetpagina toe zodra die bekend is.</div>
+      </div>
+    </div>
+    <div class="hint">Het paginanummer staat in de adresbalk: f?p=10050:<b>606</b>:… Meerdere nummers scheiden met een komma. Leeg laten = standaard.</div>
+  </div>
+
+  <div class="card">
+    <h2>Crediteuren <span class="badge" id="cred-state">ingebouwd</span></h2>
+    <div class="hint" style="margin:0 0 10px;">
+      <b>Verversen:</b> open in FitOn een kostenregel (Shipment &gt; Cost) en klik in het paneel op
+      <b>Crediteuren verversen</b>. De extensie leest dan het crediteurvenster helemaal uit, inclusief "Show More".
+      Dit geldt per browser; elke collega klikt één keer.<br><span id="cred-when"></span>
+    </div>
+    <div class="row">
+      <label for="creditors">Of plak hier een lijst (JSON)</label>
+      <textarea id="creditors" rows="4" placeholder='[{"seq":"71587","code":"LINEMAA","name":"Lineage Rotterdam Maasvlakte B.V."}, …]'
+        style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;font-size:12px;"></textarea>
+      <div class="hint">Zo herkent de extensie elke crediteur en hoeft er geen nieuwe versie uit voor een nieuwe leverancier. Leeg laten = alleen de ingebouwde lijst.</div>
+    </div>
+    <button class="ghost" id="cred-save">Crediteuren opslaan</button>
+    <button class="ghost" id="cred-clear">Wissen</button>
+  </div>
+
+  <div class="card">
+    <h2>Gedeeld dashboard <span class="badge warn" id="dash-state">niet gekoppeld</span></h2>
+    <div class="row">
+      <label for="supabaseUrl">Supabase Project URL</label>
+      <input type="text" id="supabaseUrl" placeholder="https://abcdefgh.supabase.co">
+    </div>
+    <div class="row">
+      <label for="supabaseKey">Publishable key (of anon public key)</label>
+      <input type="text" id="supabaseKey" placeholder="sb_publishable_… of eyJ…">
+      <div class="hint">Te vinden in Supabase onder Project Settings → API Keys. Iedereen op de afdeling vult dezelfde
+        twee waarden in; deel ze niet daarbuiten, want wie ze heeft kan de rapporten en facturen lezen.
+        Leeg laten = rapporten blijven op deze computer.</div>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="dashboardSendDocument"> De factuur-PDF meesturen en bewaren</label>
+      <div class="hint">Uit = alleen de gegevens van de boeking. Aan betekent dat facturen op een tweede plek
+        komen te staan; overleg dat met wie over documentbeheer gaat.</div>
+    </div>
+    <div class="bar">
+      <button class="ghost" id="dash-test" type="button">Verbinding testen</button>
+      <button class="ghost" id="dash-open" type="button">Dashboard openen</button>
+    </div>
+    <div class="hint" id="dash-result" style="margin-top:8px;"></div>
+    <details style="margin-top:14px;">
+      <summary class="hint" style="cursor:pointer;">Eigen dashboardserver gebruiken in plaats van Supabase</summary>
+      <div class="row" style="margin-top:10px;">
+        <label for="dashboardUrl">Adres van de dashboardserver</label>
+        <input type="text" id="dashboardUrl" placeholder="https://fiton-rapporten.intern/">
+        <div class="hint">Alleen gebruikt als de Supabase-velden leeg zijn.</div>
+      </div>
+      <div class="row">
+        <label for="dashboardToken">Token (moet gelijk zijn aan FITON_TOKEN op de server)</label>
+        <input type="text" id="dashboardToken" placeholder="">
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Tarieven op afstand (optioneel)</h2>
+    <div class="row">
+      <label for="ratesUrl">URL naar een JSON-bestand met tarieven</label>
+      <input type="text" id="ratesUrl" placeholder="https://…/rates.json">
+      <div class="hint">Leeg laten = de tarieven in de extensie gebruiken. Met een URL kan één persoon tarieven bijwerken voor iedereen, zonder nieuwe versie.</div>
+    </div>
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="save">Opslaan</button>
+    <button class="ghost" id="check">Controleer op updates</button>
+    <button class="danger" id="reset">Kostenvelden terugzetten</button>
+    <span class="status" id="status"></span>
+  </div>
+</div>
+<script src="supabase.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

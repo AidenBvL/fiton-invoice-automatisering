@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "FitOn Invoice Automation",
+  "version": "9.19.0",
+  "description": "Books revenue and cost lines on FitOnPortal from per-client rate templates, with review before anything is written.",
+  "minimum_chrome_version": "110",
+  "update_url": "https://REPLACE-ME.example.com/fiton/updates.xml",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://fitonportal.com/*",
+    "https://*.fitonportal.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "FitOn Invoice Automation",
+    "default_popup": "ui/popup.html"
+  },
+  "options_page": "ui/options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://fitonportal.com/*",
+        "https://*.fitonportal.com/*"
+      ],
+      "js": [
+        "content/pdf-crypto.js",
+        "content/invoice.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/page-debug.js"
+      ],
+      "matches": [
+        "https://fitonportal.com/*",
+        "https://*.fitonportal.com/*"
+      ]
+    }
+  ]
+}

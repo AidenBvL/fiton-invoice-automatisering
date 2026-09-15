@@ -1,0 +1,12 @@
+# Nooit in git: sleutels, rapporten en echte facturen
+*.pem
+key.pem
+.env
+rates.json
+dashboard/fiton-runs.db
+dashboard/documents/
+
+# Buildresultaat
+fiton-invoice-*.zip
+fiton-invoice-*.crx
+.DS_Store

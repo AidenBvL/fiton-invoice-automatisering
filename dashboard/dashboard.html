@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FitOn boekrapporten</title>
+<style>
+  :root {
+    --bg:#f3f5f9; --surface:#ffffff; --surface-2:#f8fafc; --border:#e2e8f0; --border-strong:#cbd5e1;
+    --text:#0f172a; --muted:#64748b; --faint:#94a3b8;
+    --accent:#1d4ed8; --accent-soft:#eef3ff;
+    --ok:#15803d; --ok-soft:#dcfce7; --warn:#a16207; --warn-soft:#fef3c7; --bad:#b91c1c; --bad-soft:#fee2e2;
+    --shadow:0 1px 2px rgba(15,23,42,.04), 0 2px 8px rgba(15,23,42,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0b1020; --surface:#121a2b; --surface-2:#0f1626; --border:#223049; --border-strong:#2f3f5c;
+      --text:#e6ebf3; --muted:#9aa8bd; --faint:#6b7a92;
+      --accent:#7aa7ff; --accent-soft:#18264a;
+      --ok:#4ade80; --ok-soft:#0f2e1c; --warn:#fbbf24; --warn-soft:#3a2a0b; --bad:#f87171; --bad-soft:#3b1414;
+      --shadow:none;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
+  button, input, select { font:inherit; color:inherit; }
+  .muted { color:var(--muted); }
+  .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+  /* header */
+  header { background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
+  .bar { max-width:1500px; margin:0 auto; padding:12px 20px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .brand { display:flex; align-items:center; gap:10px; margin-right:auto; }
+  .brand-mark { width:30px; height:30px; border-radius:8px; background:var(--accent); color:#fff;
+                display:grid; place-items:center; font-weight:700; font-size:13px; }
+  h1 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  .brand small { display:block; color:var(--muted); font-size:12px; line-height:1.2; }
+  .updated { font-size:12px; color:var(--muted); }
+  .icon-btn { border:1px solid var(--border); background:var(--surface); border-radius:8px; padding:6px 10px; cursor:pointer; }
+  .icon-btn:hover { border-color:var(--border-strong); }
+
+  .page { max-width:1500px; margin:0 auto; padding:16px 20px 40px; }
+
+  /* figures */
+  .kpis { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+  @media (max-width:1100px) { .kpis { grid-template-columns:repeat(3, minmax(0,1fr)); } }
+  @media (max-width:640px)  { .kpis { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .kpi { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); }
+  .kpi-label { font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .kpi-value { font-size:22px; font-weight:650; letter-spacing:-.02em; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .kpi-sub { font-size:12px; color:var(--muted); }
+  .kpi.is-attention .kpi-value { color:var(--bad); }
+
+  /* filters */
+  .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .search { flex:1 1 260px; max-width:420px; position:relative; }
+  .search input { width:100%; padding:8px 12px 8px 32px; border:1px solid var(--border); border-radius:9px; background:var(--surface); }
+  .search input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .search svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--faint); }
+  .seg { display:inline-flex; background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:3px; }
+  .seg button { border:0; background:transparent; padding:5px 11px; border-radius:6px; cursor:pointer; color:var(--muted); font-size:13px; }
+  .seg button[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  select { padding:7px 10px; border:1px solid var(--border); border-radius:9px; background:var(--surface); }
+  .count { margin-left:auto; font-size:12.5px; color:var(--muted); }
+
+  /* layout */
+  .wrap { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,560px); gap:14px; align-items:start; }
+  @media (max-width:1100px) { .wrap { grid-template-columns:1fr; } }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; }
+  .table-wrap { overflow-x:auto; }
+
+  /* run list */
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600;
+       padding:9px 12px; border-bottom:1px solid var(--border); background:var(--surface-2); white-space:nowrap; }
+  td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  tbody tr.run { cursor:pointer; }
+  tbody tr.run:hover { background:var(--surface-2); }
+  tbody tr.run:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  tbody tr.run.is-open { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
+  .sub { display:block; font-size:12px; color:var(--muted); }
+  .user { display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px; }
+  .avatar { width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent);
+            display:grid; place-items:center; font-size:10px; font-weight:700; flex:none; }
+  .clip { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .doc-flag { font-size:11px; color:var(--muted); }
+
+  .pill { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:99px; white-space:nowrap; }
+  .pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .pill.ok { background:var(--ok-soft); color:var(--ok); }
+  .pill.warn { background:var(--warn-soft); color:var(--warn); }
+  .pill.bad { background:var(--bad-soft); color:var(--bad); }
+  .pill.neutral { background:var(--surface-2); color:var(--muted); }
+
+  .empty { padding:36px 20px; text-align:center; color:var(--muted); }
+  .banner { background:var(--bad-soft); color:var(--bad); border-radius:10px; padding:10px 14px; margin-bottom:12px; display:none; }
+
+  /* detail */
+  .detail { position:sticky; top:74px; max-height:calc(100vh - 90px); overflow:auto; }
+  .d-head { padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; gap:12px; align-items:flex-start; }
+  .eyebrow { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .d-head h2 { font-size:18px; margin:0; letter-spacing:-.01em; }
+  .d-body { padding:14px 18px 18px; }
+  .d-stats { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; margin-bottom:14px; }
+  .d-stat { background:var(--surface-2); border:1px solid var(--border); border-radius:9px; padding:8px 10px; }
+  .d-stat b { display:block; font-size:15px; font-variant-numeric:tabular-nums; }
+  .d-stat span { font-size:11.5px; color:var(--muted); }
+  .meta { display:grid; grid-template-columns:130px 1fr; gap:5px 12px; font-size:13px; margin:0 0 16px; }
+  .meta dt { color:var(--muted); }
+  .meta dd { margin:0; overflow-wrap:anywhere; }
+  h3 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:18px 0 8px; }
+
+  .transport { border:1px solid var(--border); border-radius:10px; margin-bottom:10px; overflow:hidden; }
+  .transport.bad { border-left:3px solid var(--bad); }
+  .transport.warn { border-left:3px solid var(--warn); }
+  .transport.ok { border-left:3px solid var(--ok); }
+  .t-head { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; background:var(--surface-2); }
+  .t-name { font-weight:650; }
+  .chips { display:flex; gap:5px; flex-wrap:wrap; margin-top:3px; }
+  .chip { font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid var(--border); color:var(--muted); background:var(--surface); }
+  .t-total { margin-left:auto; text-align:right; }
+  .reason { padding:8px 12px; font-size:12.5px; border-top:1px solid var(--border); }
+  .reason.bad { color:var(--bad); } .reason.warn { color:var(--warn); }
+  .lines { width:100%; font-size:12.5px; }
+  .lines th { background:transparent; padding:6px 12px; }
+  .lines td { padding:6px 12px; }
+  .lines tr:last-child td { border-bottom:0; }
+  .ledger { font-size:11.5px; color:var(--muted); }
+
+  a.doc { display:inline-flex; gap:6px; align-items:center; padding:7px 12px; border:1px solid var(--border); border-radius:8px;
+          text-decoration:none; color:var(--text); font-size:13px; font-weight:600; }
+  a.doc:hover { border-color:var(--border-strong); }
+  iframe { width:100%; height:520px; border:1px solid var(--border); border-radius:10px; background:#fff; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">
+      <div class="brand-mark">F</div>
+      <div><h1>FitOn boekrapporten</h1><small>Wie heeft welke factuur geboekt, en hoe ging het</small></div>
+    </div>
+    <span class="updated" id="updated"></span>
+    <button class="icon-btn" id="refresh" title="Nu verversen">↻ Verversen</button>
+  </div>
+</header>
+
+<main class="page">
+  <div class="banner" id="banner"></div>
+
+  <section class="kpis" id="kpis" aria-label="Kengetallen laatste 30 dagen"></section>
+
+  <div class="toolbar">
+    <label class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="search" id="q" placeholder="Factuur, crediteur, zending, container of gebruiker" aria-label="Zoeken">
+    </label>
+    <div class="seg" role="group" aria-label="Resultaat">
+      <button data-status="" aria-pressed="true">Alles</button>
+      <button data-status="done" aria-pressed="false">Geboekt</button>
+      <button data-status="partial" aria-pressed="false">Deels</button>
+      <button data-status="failed" aria-pressed="false">Niet gelukt</button>
+    </div>
+    <select id="user" aria-label="Gebruiker"><option value="">Alle gebruikers</option></select>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Wanneer</th><th>Door</th><th>Factuur</th><th>Zending</th>
+              <th class="num">Zendingen</th><th class="num">Bedrag</th><th>Resultaat</th>
+            </tr>
+          </thead>
+          <tbody id="rows"><tr><td colspan="7" class="empty">Laden…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <aside class="card detail" id="detail" aria-live="polite">
+      <div class="empty">Kies een run om te zien wat er is geboekt, door wie, en waarom iets niet lukte.</div>
+    </aside>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s === null || s === undefined ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const euro = n => (n === null || n === undefined || n === '' || isNaN(Number(n))) ? '—' :
+  new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n);
+const when = ms => ms ? new Date(ms).toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const ago = ms => {
+  if (!ms) return '';
+  const s = (Date.now() - ms) / 1000;
+  if (s < 60) return 'zojuist';
+  if (s < 3600) return `${Math.floor(s / 60)} min geleden`;
+  if (s < 86400) return `${Math.floor(s / 3600)} uur geleden`;
+  const d = Math.floor(s / 86400);
+  return d === 1 ? 'gisteren' : `${d} dagen geleden`;
+};
+const duration = ms => {
+  if (!ms && ms !== 0) return '—';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+};
+const initials = name => String(name || '?').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() || '?';
+
+const state = { status: '', user: '', q: '', openId: null };
+
+/* A run's result, the same three ways the server counts them. */
+function runStatus(r) {
+  if (r.outcome === 'done') return { cls: 'ok', label: 'Geboekt' };
+  if (Number(r.lines_booked) > 0) return { cls: 'warn', label: `${r.lines_booked} van ${r.lines_total}` };
+  return { cls: 'bad', label: 'Niet gelukt' };
+}
+const pill = s => `<span class="pill ${s.cls}">${esc(s.label)}</span>`;
+
+const TRANSPORT_STATUS = {
+  done:      { cls: 'ok',   label: 'Geboekt' },
+  duplicate: { cls: 'warn', label: 'Overgeslagen' },
+  notfound:  { cls: 'bad',  label: 'Niet gevonden' },
+  failed:    { cls: 'bad',  label: 'Mislukt' },
+  pending:   { cls: 'warn', label: 'Niet verwerkt' },
+  booking:   { cls: 'warn', label: 'Onbekend' }
+};
+const CONFIDENCE = {
+  exact: 'Klopt met het factuurtotaal',
+  unverified: 'Niet gecontroleerd tegen een totaal',
+  mismatch: 'Wijkt af van het factuurtotaal',
+  none: 'Geen kostenregels herkend'
+};
+const DESC_MODE = {
+  both: 'Factuur + zending + kostensoort', invoice: 'Factuur + zending',
+  invoiceOnly: 'Alleen factuurnummer', name: 'Alleen kostensoort'
+};
+
+function showError(message) {
+  const b = $('banner');
+  b.textContent = message || '';
+  b.style.display = message ? 'block' : 'none';
+}
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`server antwoordde ${res.status}`);
+  return res.json();
+}
+
+async function loadStats() {
+  const s = await getJSON('/api/stats');
+  const attention = (s.partial || 0) + (s.failed || 0);
+  const rate = s.runs ? Math.round((s.done / s.runs) * 100) : 0;
+  $('kpis').innerHTML = [
+    { label: 'Runs', value: s.runs, sub: 'laatste 30 dagen' },
+    { label: 'Volledig geboekt', value: `${rate}%`, sub: `${s.done} van ${s.runs}` },
+    // { label: 'Aandacht nodig', value: attention, sub: `${s.partial} deels · ${s.failed} niet gelukt`, attention: attention > 0 },
+    { label: 'Geboekt bedrag', value: euro(s.amount), sub: 'volledig geboekte runs' },
+    { label: 'Gebruikers', value: s.userCount, sub: 'actief in 30 dagen' }
+  ].map(k => `
+    <div class="kpi ${k.attention ? 'is-attention' : ''}">
+      <div class="kpi-label">${esc(k.label)}</div>
+      <div class="kpi-value">${esc(k.value)}</div>
+      <div class="kpi-sub">${esc(k.sub)}</div>
+    </div>`).join('');
+
+  const sel = $('user');
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">Alle gebruikers</option>' + (s.users || [])
+    .map(u => `<option value="${esc(u.user)}">${esc(u.user)} (${u.runs})</option>`).join('');
+  sel.value = keep;
+}
+
+async function loadRuns() {
+  const params = new URLSearchParams({ limit: '200' });
+  if (state.q) params.set('q', state.q);
+  if (state.status) params.set('status', state.status);
+  if (state.user) params.set('user', state.user);
+  const data = await getJSON('/api/runs?' + params);
+  const runs = data.runs || [];
+
+  $('count').textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;
+  $('rows').innerHTML = runs.length ? runs.map(r => {
+    const t = r.booked_at || r.received_at;
+    const zending = r.shipment || r.container || '';
+    return `
+    <tr class="run ${r.id === state.openId ? 'is-open' : ''}" data-id="${r.id}" tabindex="0">
+      <td><span title="${esc(when(t))}">${esc(ago(t))}</span><span class="sub">${esc(when(t))}</span></td>
+      <td>${r.user ? `<span class="user"><span class="avatar">${esc(initials(r.user))}</span>${esc(r.user)}</span>` : '<span class="muted">onbekend</span>'}</td>
+      <td><b>${esc(r.invoice_no || '—')}</b><span class="sub clip" title="${esc(r.creditor || '')}">${esc(r.creditor || 'onbekende crediteur')}</span></td>
+      <td><span class="clip" title="${esc(zending)}">${esc(zending || '—')}</span>${r.has_doc ? '<span class="doc-flag">📄 factuur bewaard</span>' : ''}</td>
+      <td class="num">${r.lines_total ? `${r.lines_booked ?? 0} / ${r.lines_total}` : '—'}</td>
+      <td class="num">${euro(r.amount)}</td>
+      <td>${pill(runStatus(r))}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7" class="empty">${state.q || state.status || state.user
+      ? 'Niets gevonden met deze filters.' : 'Nog geen runs ontvangen. Zodra iemand een factuur boekt, staat die hier.'}</td></tr>`;
+}
+
+async function refresh() {
+  try {
+    await Promise.all([loadStats(), loadRuns()]);
+    showError('');
+    $('updated').textContent = 'Bijgewerkt ' + new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    showError('Kan de gegevens niet ophalen: ' + e.message);
+  }
+}
+
+function transportCard(t) {
+  const st = TRANSPORT_STATUS[t.status] || TRANSPORT_STATUS.pending;
+  const lines = t.lines || [];
+  return `
+  <div class="transport ${st.cls}">
+    <div class="t-head">
+      <div>
+        <div class="t-name">${esc(t.name || 'Zonder container, eenheid of referentie')}</div>
+        <div class="chips">${(t.facts || []).map(f => `<span class="chip">${esc(f)}</span>`).join('')}</div>
+      </div>
+      <div class="t-total">${pill(st)}<div class="num" style="margin-top:4px;font-weight:600">${euro(t.total)}</div></div>
+    </div>
+    ${t.reason ? `<div class="reason ${st.cls === 'ok' ? '' : st.cls}">${esc(t.reason)}</div>` : ''}
+    ${lines.length ? `
+    <table class="lines">
+      <thead><tr><th>Kosten</th><th class="num">Aantal</th><th class="num">Prijs</th><th class="num">Bedrag</th></tr></thead>
+      <tbody>${lines.map(l => `<tr>
+        <td>${esc(l.desc)}${l.ledgerName || l.ledger ? `<div class="ledger">${esc([l.ledger, l.ledgerName].filter(Boolean).join(' · '))}</div>` : ''}</td>
+        <td class="num">${esc(l.qty ?? '')}</td><td class="num">${euro(l.price)}</td><td class="num">${euro(l.amount)}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : ''}
+  </div>`;
+}
+
+async function showDetail(id) {
+  state.openId = id;
+  document.querySelectorAll('#rows tr.run').forEach(tr => tr.classList.toggle('is-open', Number(tr.dataset.id) === id));
+  const box = $('detail');
+  box.innerHTML = '<div class="empty">Laden…</div>';
+
+  let run;
+  try { run = await getJSON('/api/runs/' + id); }
+  catch (e) { box.innerHTML = `<div class="empty">Kan deze run niet laden: ${esc(e.message)}</div>`; return; }
+  const d = run.detail || {};
+  const transports = Array.isArray(d.transports) ? d.transports : null;
+  const count = st => (transports || []).filter(t => t.status === st).length;
+  const bookedAmount = d.bookedAmount ?? (run.outcome === 'done' ? run.amount : null);
+
+  const stats = transports ? [
+    { v: `${count('done')} / ${transports.length}`, l: 'zendingen geboekt' },
+    { v: euro(run.amount), l: 'factuurbedrag' },
+    { v: euro(bookedAmount), l: 'geboekt' },
+    { v: count('duplicate') + count('notfound') + count('failed') + count('pending'), l: 'overgeslagen of mislukt' }
+  ] : [
+    { v: `${run.lines_booked ?? 0} / ${run.lines_total ?? 0}`, l: 'regels geboekt' },
+    { v: euro(run.amount), l: 'bedrag' },
+    { v: run.avg_ms ? (run.avg_ms / 1000).toFixed(1) + ' s' : '—', l: 'per regel' },
+    { v: d.client || d.mode || '—', l: 'template' }
+  ];
+
+  const meta = [
+    ['Ingelezen door', run.user || 'onbekend'],
+    ['Tijdstip', when(run.booked_at || run.received_at)],
+    ['Doorlooptijd', d.durationMs != null ? duration(d.durationMs) : null],
+    ['Crediteur', [run.creditor, run.creditor_seq ? `(${run.creditor_seq})` : ''].filter(Boolean).join(' ') || null],
+    ['Controle', d.confidence ? (CONFIDENCE[d.confidence] || d.confidence)
+        + (d.statedTotal != null && d.confidence !== 'exact' ? ` · document noemt ${euro(d.statedTotal)}` : '') : null],
+    ['Bestand', d.fileName || null],
+    ['Omschrijving', d.descMode ? (DESC_MODE[d.descMode] || d.descMode) + (d.combine ? ' · één regel per zending' : '') : null],
+    ['Bestaande kosten', d.ignoreExisting ? 'bewust genegeerd bij het boeken' : (transports ? 'gecontroleerd voor het boeken' : null)],
+    ['Melding', run.message || null],
+    ['Computer', run.machine || null],
+    ['Versie extensie', d.version || null]
+  ].filter(([, v]) => v);
+
+  const legacyLines = !transports && (d.items || []).length ? `
+    <h3>Geboekte regels</h3>
+    <div class="transport"><table class="lines">
+      <thead><tr><th>Omschrijving</th><th class="num">Aantal</th><th class="num">Prijs</th><th class="num">Bedrag</th></tr></thead>
+      <tbody>${d.items.map(l => `<tr>
+        <td>${esc(l.desc)}${l.ledgerName || l.ledger ? `<div class="ledger">${esc(l.ledgerName || l.ledger)}</div>` : ''}</td>
+        <td class="num">${esc(l.qty ?? '')}</td><td class="num">${euro(l.price)}</td><td class="num">${euro(l.amount)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '';
+
+  box.innerHTML = `
+    <div class="d-head">
+      <div style="min-width:0">
+        <div class="eyebrow">Factuur</div>
+        <h2>${esc(run.invoice_no || 'Zonder factuurnummer')}</h2>
+        <div class="muted">${esc(run.creditor || 'onbekende crediteur')}</div>
+      </div>
+      <div style="margin-left:auto">${pill(runStatus(run))}</div>
+    </div>
+    <div class="d-body">
+      <div class="d-stats">${stats.map(s => `<div class="d-stat"><b>${esc(s.v)}</b><span>${esc(s.l)}</span></div>`).join('')}</div>
+      <dl class="meta">${meta.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+
+      ${transports ? `<h3>Zendingen (${transports.length})</h3>${transports.map(transportCard).join('')}` : legacyLines}
+
+      <h3>Factuur</h3>
+      ${run.doc_name
+        ? `<a class="doc" href="/api/runs/${run.id}/document" target="_blank" rel="noopener">📄 ${esc(run.doc_name)} openen</a>
+           <iframe src="/api/runs/${run.id}/document" title="Factuur ${esc(run.invoice_no || '')}"></iframe>`
+        : `<p class="muted">${d.fileName ? 'De PDF is bij deze run niet meegestuurd.' : 'Geen factuur bij deze run.'}</p>`}
+    </div>`;
+}
+
+/* events */
+let searchTimer;
+$('q').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); loadRuns().catch(err => showError(err.message)); }, 250);
+});
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  state.status = b.dataset.status;
+  document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  loadRuns().catch(err => showError(err.message));
+}));
+$('user').addEventListener('change', e => { state.user = e.target.value; loadRuns().catch(err => showError(err.message)); });
+$('refresh').addEventListener('click', refresh);
+$('rows').addEventListener('click', e => {
+  const tr = e.target.closest('tr.run');
+  if (tr) showDetail(Number(tr.dataset.id));
+});
+$('rows').addEventListener('keydown', e => {
+  const tr = e.target.closest('tr.run');
+  if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showDetail(Number(tr.dataset.id)); }
+});
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
