@@ -27,5 +27,7 @@ al vertellen op welke versie ze draaiden. Wie geen Supabase gebruikt, kan in de
 instellingen een eigen JSON-bestand opgeven.
 
 Verder: `fiton.readFile()` leest meerdere bestanden en zet er één regel per
-bestand bij, `fiton.version()` is nieuw, en `fiton.marks()` werkt nu ook vanuit
-de console van de pagina zelf.
+bestand bij, `fiton.version()` zegt nu niet alleen wat hier draait maar ook of
+dat de nieuwste is, en `fiton.marks()` werkt eindelijk ook vanuit de console van
+de pagina zelf — dat stond wel in de README, maar de brug naar de pagina kende
+het commando niet.

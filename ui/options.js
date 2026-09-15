@@ -233,6 +233,9 @@ $('check').addEventListener('click', () => {
     const latest = res.latest || {};
     paintVersionCheck(latest);
     if (res.status === 'update_available') status('Update gevonden — wordt geïnstalleerd.', 'ok');
+    // A failed check knows nothing, so it must not come out as a green "up to date":
+    // latest.latest is deliberately the answer of the last check that did work.
+    else if (latest.error) status('Versiecontrole mislukt — zie Versiecontrole.', 'err');
     else if (latest.outdated) status(`Versie ${latest.latest} is beschikbaar — zie Versiecontrole.`, 'err');
     else if (res.status === 'no_update' || latest.latest) status('Je hebt de nieuwste versie.', 'ok');
     else if (!latest.configured) status('Niets om aan te vragen welke versie de nieuwste is — zie Versiecontrole.', 'err');
@@ -315,6 +318,12 @@ $('cred-clear').addEventListener('click', () => {
    de service worker; hier staat alleen wat eruit kwam, plus een knop om het
    meteen opnieuw te vragen. */
 
+/* The version, the notes and the link come from the releases table or from
+   whatever JSON file the settings point at, so none of it is ours to trust
+   with markup. The popup and the panel escape it too. */
+const escHtml = s => String(s === null || s === undefined ? '' : s)
+  .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 function paintVersionCheck(info) {
   const badge = $('ver-state');
   const out = $('ver-result');
@@ -327,6 +336,17 @@ function paintVersionCheck(info) {
     out.textContent = 'Nog niet gecontroleerd.';
     return;
   }
+  /* A check that failed is not the same as nothing to ask, and not the same as
+     up to date either. It is asked about first, because it is the only one of
+     the three with something to act on. */
+  if (info.error) {
+    badge.textContent = 'onbekend';
+    badge.className = 'badge warn';
+    out.textContent = `Laatste controle mislukt: ${info.error}`
+      + (info.checkedOkAt ? ` (laatst gelukt ${when(info.checkedOkAt)})` : '')
+      + (info.outdated ? ` Volgens die laatste controle loop je achter: ${info.latest} is er.` : '');
+    return;
+  }
   if (!info.configured) {
     badge.textContent = 'geen bron';
     badge.className = 'badge warn';
@@ -337,18 +357,17 @@ function paintVersionCheck(info) {
   if (info.outdated) {
     badge.textContent = 'verouderd';
     badge.className = 'badge warn';
-    out.innerHTML = `Versie <b>${info.latest}</b> is er; deze computer draait <b>${info.current}</b>.`
-      + (info.notes ? ' ' + info.notes : '')
-      + (info.url ? ` <a href="${info.url}" target="_blank" rel="noreferrer">Nieuwe versie ophalen</a>.` : '');
+    out.innerHTML = `Versie <b>${escHtml(info.latest)}</b> is er; deze computer draait <b>${escHtml(info.current)}</b>.`
+      + (info.notes ? ' ' + escHtml(info.notes) : '')
+      + (/^https?:\/\//i.test(info.url || '')
+          ? ` <a href="${escHtml(info.url)}" target="_blank" rel="noreferrer">Nieuwe versie ophalen</a>.` : '');
     return;
   }
-  badge.textContent = info.error ? 'onbekend' : 'up-to-date';
-  badge.className = info.error ? 'badge warn' : 'badge';
-  out.textContent = info.error
-    ? `Laatste controle mislukt: ${info.error}` + (info.checkedOkAt ? ` (laatst gelukt ${when(info.checkedOkAt)})` : '')
-    : `Deze computer draait ${info.current}`
-      + (info.latest ? `, en dat is de nieuwste` : ', er is nog geen versie gepubliceerd')
-      + (info.checkedAt ? ` · gecontroleerd ${when(info.checkedAt)}` : '');
+  badge.textContent = 'up-to-date';
+  badge.className = 'badge';
+  out.textContent = `Deze computer draait ${info.current}`
+    + (info.latest ? ', en dat is de nieuwste' : ', er is nog geen versie gepubliceerd')
+    + (info.checkedAt ? ` · gecontroleerd ${when(info.checkedAt)}` : '');
 }
 
 chrome.storage.local.get(['versionCheck'], d => paintVersionCheck(d.versionCheck));

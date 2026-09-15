@@ -7150,7 +7150,33 @@
         let lastRows = null, lastParsed = null;
 
         const handlers = {
-            version: () => { const r = out(); r.logs.push(`FitOn Invoice Automation v${VERSION}`); r.value = VERSION; return r; },
+            /* Wat hier draait, en wat de versiecontrole laatst zei. Vraagt het
+               meteen opnieuw, zodat je niet op de zesuurscyclus hoeft te wachten. */
+            version: () => new Promise(resolve => {
+                const r = out();
+                r.value = VERSION;
+                r.logs.push(`FitOn Invoice Automation v${VERSION}`);
+                try {
+                    chrome.runtime.sendMessage({ type: 'checkVersion' }, info => {
+                        if (chrome.runtime.lastError || !info) {
+                            r.logs.push('Versiecontrole gaf geen antwoord.');
+                            return resolve(r);
+                        }
+                        r.tables.push({ title: 'versiecontrole', rows: [{
+                            hier: info.current || VERSION,
+                            nieuwste: info.latest || '-',
+                            verouderd: info.outdated ? 'ja' : 'nee',
+                            bron: info.source || (info.configured ? '-' : 'niets ingesteld'),
+                            gecontroleerd: info.checkedAt ? new Date(info.checkedAt).toLocaleString('nl-NL') : '-',
+                            fout: info.error || '-'
+                        }] });
+                        resolve(r);
+                    });
+                } catch (e) {
+                    r.logs.push('Versiecontrole niet bereikbaar: ' + e.message);
+                    resolve(r);
+                }
+            }),
 
             help: () => {
                 const r = out();

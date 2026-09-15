@@ -141,9 +141,13 @@ as $$
   with published as (
     select version, notes, url, 'released'::text as source
     from public.releases
-    where version ~ '^[0-9]+(\.[0-9]+)*$'
+    -- Zoals Chrome ze toestaat: hooguit vier getallen onder de 65536. Ruimer
+    -- toelaten betekent dat één vertypte regel (een datum als versie) de cast
+    -- hieronder laat overlopen, en dan krijgt de hele afdeling een foutmelding
+    -- in plaats van een antwoord.
+    where version ~ '^[0-9]{1,5}(\.[0-9]{1,5}){0,3}$'
     -- als tekst gesorteerd komt 9.9.0 ná 9.20.0; als lijst van getallen niet
-    order by string_to_array(version, '.')::int[] desc
+    order by string_to_array(version, '.')::bigint[] desc
     limit 1
   ),
   seen as (
@@ -151,10 +155,10 @@ as $$
            null::text as notes, null::text as url, 'gebruik'::text as source
     from public.runs
     where received_at >= now() - interval '30 days'
-      and coalesce(detail->>'version', '') ~ '^[0-9]+(\.[0-9]+)*$'
+      and coalesce(detail->>'version', '') ~ '^[0-9]{1,5}(\.[0-9]{1,5}){0,3}$'
     group by detail->>'version'
     having count(*) >= 2
-    order by string_to_array(detail->>'version', '.')::int[] desc
+    order by string_to_array(detail->>'version', '.')::bigint[] desc
     limit 1
   )
   select coalesce(

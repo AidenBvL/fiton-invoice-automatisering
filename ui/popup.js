@@ -33,7 +33,9 @@ function paintVersion(info) {
   if (!info) { box.style.display = 'none'; state.textContent = ''; return; }
 
   if (info.outdated) {
-    const link = info.url
+    // The link comes from the releases table or a JSON file, so only a plain
+    // http(s) address is turned into one.
+    const link = /^https?:\/\//i.test(info.url || '')
       ? `<div class="notes"><a href="${esc(info.url)}" target="_blank" rel="noreferrer">Nieuwe versie ophalen</a></div>` : '';
     box.innerHTML = `<b>Versie ${esc(info.latest)} is er — jij hebt ${esc(info.current)}</b>`
       + (info.notes ? `<div class="notes">${esc(info.notes)}</div>` : '')

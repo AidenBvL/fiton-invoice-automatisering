@@ -77,7 +77,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;   // async response
   }
   if (msg && msg.type === 'checkVersion') {
-    checkLatestVersion().then(latest => sendResponse(latest));
+    checkLatestVersion()
+      .then(latest => sendResponse(latest))
+      .catch(e => sendResponse({ error: String(e.message || e), configured: true, outdated: false }));
     return true;
   }
   if (msg && msg.type === 'getVersion') {
@@ -165,9 +167,13 @@ const VERSION_EVERY_MIN = 360;          // every six hours, as Chrome does
    an alarm that is already set is therefore left alone. */
 async function scheduleVersionCheck() {
   if (!chrome.alarms) return;
-  try {
-    if (await chrome.alarms.get(VERSION_ALARM)) return;
-  } catch (e) { /* no alarm yet, or an older Chrome: just create it */ }
+  // The callback form, because alarms only started returning promises in
+  // Chrome 111 and the manifest still allows 110.
+  const existing = await new Promise(resolve => {
+    try { chrome.alarms.get(VERSION_ALARM, alarm => resolve(chrome.runtime.lastError ? null : alarm)); }
+    catch (e) { resolve(null); }
+  });
+  if (existing) return;
   chrome.alarms.create(VERSION_ALARM, { delayInMinutes: 1, periodInMinutes: VERSION_EVERY_MIN });
 }
 
@@ -217,8 +223,11 @@ async function checkLatestVersion() {
   } catch (e) {
     /* Unreachable for a moment is not the same as up to date: keep what the
        last successful check said, so the warning does not blink off. */
+    /* readLatest only gets as far as throwing once it has found somewhere to
+       ask, so reaching here means there IS a source and it failed - never that
+       nothing is set up. Saying otherwise would hide the error that explains it. */
     result.error = String(e.message || e);
-    result.configured = before.configured !== undefined ? before.configured : true;
+    result.configured = true;
     result.latest = before.latest || '';
     result.notes = before.notes || '';
     result.url = before.url || '';
