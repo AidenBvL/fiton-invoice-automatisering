@@ -4024,8 +4024,13 @@
         const readability = frags => frags.reduce((n, f) => n + (f.text.match(/[A-Za-z]/g) || []).length, 0);
 
         const rows = [];
+        /* Which sheet a row came off. A carrier often staples a notice or a
+           specification behind the invoice that restates the same amounts, and
+           those must not be read as more charges - see parseInvoiceRows. */
+        let sheet = 0;
         streams.forEach(({ content }) => {
             if (!/\bTJ\b|\bTj\b/.test(content)) return;
+            sheet++;
 
             let frags = pdfFragments(content, fontToCmap);
 
@@ -4050,7 +4055,7 @@
                 const cells = list.sort((a, b) => a.x - b.x)
                     .map(f => ({ x: f.x, text: f.text.trim() }))
                     .filter(c => c.text);
-                if (cells.length) rows.push({ y, cells, raw: cells.map(c => c.text).join(' ').replace(/\s+/g, ' ').trim() });
+                if (cells.length) rows.push({ y, sheet, cells, raw: cells.map(c => c.text).join(' ').replace(/\s+/g, ' ').trim() });
             });
         });
         return rows;
@@ -4176,7 +4181,8 @@
         { re: /emergency (fuel|bunker)/i,                                      led: () => LEDGER.emergencyFuel },
         { re: /terminal (&|and) transfer|import terminal/i,                    led: () => LEDGER.importTerminal },
         { re: /container handling|shunt|afzetten|opzetten|off chassis|on chassis/i, led: () => LEDGER.containerHandling },
-        { re: /plug.?in|reefer power|genset|gen-?set|special equipment/i,      led: () => LEDGER.specialEquip },
+        // OOCL writes "RF PWR AND MONITOR CHRG" for what MSC calls "Plug In"
+        { re: /plug.?in|reefer power|reefer mon|rf ?pwr|genset|gen-?set|special equipment/i, led: () => LEDGER.specialEquip },
         { re: /vgm\b|verified gross/i,                                         led: () => LEDGER.vgm },
         { re: /lashing|securing/i,                                             led: () => LEDGER.lashing },
         { re: /imo (surcharge|declaration)|dangerous goods|dgd\b/i,            led: () => LEDGER.imo },
@@ -4452,10 +4458,32 @@
            does not make a row a line of text. */
         const hasWords = r => /[A-Za-z]{3}/.test(r.raw.replace(CURRENCY_RE, ''));
         const merged = [];
+        const taken = new Set();
 
-        rows.forEach(row => {
+        rows.forEach((row, index) => {
+            if (taken.has(index)) return;
             if (hasWords(row) || !moneyCellsOf(row).length) {
-                merged.push({ y: row.y, cells: row.cells.slice(), raw: row.raw });
+                merged.push({ y: row.y, sheet: row.sheet, cells: row.cells.slice(), raw: row.raw });
+                return;
+            }
+
+            /* Text standing on this very baseline comes first, even when it
+               arrives after the figures. ONE writes a charge's description
+               beside its figures with the baselines half a point apart, while
+               the row above is the PREVIOUS charge's wrapped description - so
+               looking only upwards gave "TERMINAL SECURITY CHARGE (D)" the name
+               "DISCHARGE", and with it the wrong ledger. */
+            let beside = -1;
+            for (let k = index + 1; k <= index + 2 && k < rows.length; k++) {
+                if (taken.has(k)) continue;
+                const other = rows[k];
+                if (Math.abs(other.y - row.y) > 2.5) break;          // past this line
+                if (hasWords(other) && !moneyCellsOf(other).length) { beside = k; break; }
+            }
+            if (beside >= 0) {
+                taken.add(beside);
+                const cells = row.cells.concat(rows[beside].cells).sort((a, b) => a.x - b.x);
+                merged.push({ y: row.y, sheet: row.sheet, cells, raw: cells.map(c => c.text).join(' ') });
                 return;
             }
 
@@ -4471,7 +4499,7 @@
             }
 
             if (!target) {
-                merged.push({ y: row.y, cells: row.cells.slice(), raw: row.raw });
+                merged.push({ y: row.y, sheet: row.sheet, cells: row.cells.slice(), raw: row.raw });
                 return;
             }
             target.cells = target.cells.concat(row.cells).sort((a, b) => a.x - b.x);
@@ -4532,6 +4560,13 @@
         };
         const totalLabelBeside = i => sameLineRows(i).some(r =>
             !moneyCellsOf(r).length && TOTAL_DESC.test(r.raw.trim()));
+
+        /* The row of column titles above a charge table is not the name of a
+           charge: "CHARGE DESCRIPTION BASIS RATE CUR VAT%" only names a ledger
+           because of the word VAT in it. Two such words and it is a header. */
+        const COLUMN_WORD = /^(description|desc|omschrijving|basis|rate|tarief|cur|currency|valuta|vat|btw|tax|amount|bedrag|qty|quantity|aantal|unit|price|prijs|total|totaal|value|waarde|exchange|extended|charge|charges|code|item|date|datum|per|no|nr)[.:%]?$/i;
+        const isColumnHeader = text =>
+            String(text).split(/\s+/).filter(t => COLUMN_WORD.test(t)).length >= 2;
 
         /* "600,00 EUR @ 0 % VAT   EUR 0,00" states what the VAT was worked out
            over. The 600,00 is the basis, not a charge of its own. */
@@ -4616,11 +4651,11 @@
                arithmetic: 230 + 230 + 230 has no line that is the sum of the
                others. So a row whose description starts with a total word is
                never booked; its amount is kept to check the charges against. */
-            if (TOTAL_DESC.test(desc)) { labelledTotals.push(round2(amount)); return; }
+            if (TOTAL_DESC.test(desc)) { labelledTotals.push({ value: round2(amount), sheet: row.sheet }); return; }
 
             /* The same total, with its label in a row of its own: the amount is
                that label's, not of whatever text happened to land beside it. */
-            if (totalLabelBeside(rowIndex)) { labelledTotals.push(round2(amount)); return; }
+            if (totalLabelBeside(rowIndex)) { labelledTotals.push({ value: round2(amount), sheet: row.sheet }); return; }
 
             // A row stating a VAT rate is the tax specification, never a charge.
             if (VAT_RATE_ROW.test(row.raw)) return;
@@ -4630,7 +4665,7 @@
                against a total that includes it, and shown as skipped. */
             if (VAT_DESC.test(desc)) {
                 // "VAT applied as indicated on charges ... Total Excluding Tax" is a total
-                if (/\b(?:totaal|total|totale)\b/i.test(desc)) labelledTotals.push(round2(amount));
+                if (/\b(?:totaal|total|totale)\b/i.test(desc)) labelledTotals.push({ value: round2(amount), sheet: row.sheet });
                 else skippedVat.push(round2(amount));
                 return;
             }
@@ -4651,7 +4686,10 @@
                     const above = rows[j];
                     if (moneyCellsOf(above).length) break;      // another charge, not a heading
                     const heading = above.raw.trim();
-                    if (heading.length <= 60 && !ledgerIsGuess(heading)) { desc = `${heading} - ${desc}`; break; }
+                    if (heading.length <= 60 && !isColumnHeader(heading) && !ledgerIsGuess(heading)) {
+                        desc = `${heading} - ${desc}`;
+                        break;
+                    }
                 }
             }
 
@@ -4705,7 +4743,7 @@
             if (unit && unit.kind === 'container' && !current.container) current.container = unit.value;
             current.lines.push({
                 desc, qty: round2(qty), unitPrice: round2(unitPrice), amount: round2(amount),
-                row: row.raw,
+                row: row.raw, sheet: row.sheet,
                 // A charge row that carries the unit is the transport line itself,
                 // which is worth knowing when nothing in its wording says so
                 // ("ECT Delta - Nijkerk").
@@ -4963,6 +5001,32 @@
 
         let statedTotal = null;
 
+        /* A carrier often staples a notice or a specification behind the invoice
+           that restates the same amounts - an OOCL reefer power notice repeats
+           its 60,00 four times, on its own rows, and the invoice came to 180,00.
+           When the charges together match no total the document states, but the
+           charges off one sheet do match a total printed on that same sheet,
+           that sheet is the invoice and the rest is the annex. Nothing happens
+           unless the document is already not adding up, so a genuine second page
+           of charges is never thrown away over this. */
+        const totalStated = v => labelledTotals.some(t => Math.abs(t.value - v) < 0.02);
+        const sheetsInPlay = [...new Set(groups.flatMap(g => g.lines.map(l => l.sheet)).filter(Boolean))];
+        if (labelledTotals.length && sheetsInPlay.length > 1) {
+            const sumOf = sheet => round2(groups.reduce((a, g) =>
+                a + g.lines.filter(l => l.sheet === sheet).reduce((b, l) => b + l.amount, 0), 0));
+            const everything = round2(groups.reduce((a, g) => a + g.lines.reduce((b, l) => b + l.amount, 0), 0));
+            if (!totalStated(everything)) {
+                const invoiceSheet = sheetsInPlay.find(sheet => {
+                    const sum = sumOf(sheet);
+                    return sum !== 0 && labelledTotals.some(t => t.sheet === sheet && Math.abs(t.value - sum) < 0.02);
+                });
+                if (invoiceSheet !== undefined) {
+                    log(`Charges taken from sheet ${invoiceSheet} only; ${sheetsInPlay.length - 1} more sheet(s) restate them`);
+                    groups.forEach(g => { g.lines = g.lines.filter(l => l.sheet === invoiceSheet); });
+                }
+            }
+        }
+
         /* A grand total often sits at the bottom of the last block and gets read
            as one more charge. It gives itself away: it equals everything else
            added together, so the sum including it is exactly twice its value. */
@@ -5142,7 +5206,7 @@
             note = 'Geen totaal gevonden om tegen te controleren.';
         } else if (Math.abs(calcTotal - statedTotal) < 0.02) {
             const lineCount = groups.reduce((n, g) => n + g.lines.length, 0);
-            const totalRowAgrees = labelledTotals.some(v => Math.abs(v - statedTotal) < 0.02);
+            const totalRowAgrees = labelledTotals.some(t => Math.abs(t.value - statedTotal) < 0.02);
             if (lineCount === 1 && Math.abs(groups[0].lines[0].amount - statedTotal) < 0.02 && !totalRowAgrees) {
                 // Could be a one-charge invoice, or the total read as a charge.
                 // Nothing in the document distinguishes the two, so do not claim
