@@ -4637,10 +4637,17 @@
                taken in the order they appear, so the quantity stays the quantity. */
             let qty = 1, unitPrice = amount;
             const numbersInRow = [];
+            /* A date is not a number the row is counting with. MSC writes
+               "from 18/08/2026 to 27/08/2026" on a storage line, and 18 x 27 is
+               486,00 - exactly the amount - so the line booked 18 pieces at
+               27,00 instead of one at 486,00. Dates come out before anything is
+               read as a quantity or a price. */
+            const DATES_RE = new RegExp(DATE_IN_TEXT.source, 'gi');
             row.cells.filter(c => c.x < amountX - 1).forEach(c => {
                 const re = /\d[\d.,]*/g;
                 let m;
-                while ((m = re.exec(c.text))) {
+                const text = c.text.replace(DATES_RE, ' ');
+                while ((m = re.exec(text))) {
                     const v = parseAmount(m[0]);
                     if (!isNaN(v) && v > 0) numbersInRow.push({ value: v, x: c.x, at: m.index });
                 }
