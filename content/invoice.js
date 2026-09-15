@@ -4323,8 +4323,14 @@
        text is what stands on the page, so it can be cut out of a description. */
     function unitIn(text) {
         const s = String(text || '');
-        const cm = CONTAINER_ANY.exec(s);
-        if (cm) {
+        /* Every candidate, not just the first. An invoice number like
+           NLIC0129529 is four letters and seven digits too; stopping at it meant
+           the container standing further along was never found, and a whole
+           block of charges went looking for a shipment with nothing to look it
+           up by. */
+        const re = new RegExp(CONTAINER_ANY.source, 'g');
+        let cm;
+        while ((cm = re.exec(s))) {
             const c = (cm[1] + cm[2] + (cm[3] || '')).replace(/\s+/g, '').toUpperCase();
             if (isContainerNo(c)) return { kind: 'container', value: c, text: cm[0] };
         }
@@ -4631,6 +4637,24 @@
 
             if (current && current.heading && isWeakDesc(desc)) desc = current.heading;
 
+            /* Some invoices print what the charge IS as a heading above the
+               block and leave the row itself to the container and the dates:
+               MSC puts "Plug In" or "Storage" a couple of rows up and the line
+               reads "[40' HIGH CUBE REEFER] from 18/08 to 27/08". Nothing in
+               that names a ledger, so every one of them booked on the fallback -
+               reefer power and quay storage alike ended up on Trucking Costs.
+               When the row itself says nothing a ledger can be read from, the
+               nearest heading above it that does is put in front. A row that
+               already names its own charge is never touched. */
+            if (ledgerIsGuess(desc)) {
+                for (let j = rowIndex - 1; j >= 0 && rowIndex - j <= 4; j--) {
+                    const above = rows[j];
+                    if (moneyCellsOf(above).length) break;      // another charge, not a heading
+                    const heading = above.raw.trim();
+                    if (heading.length <= 60 && !ledgerIsGuess(heading)) { desc = `${heading} - ${desc}`; break; }
+                }
+            }
+
             // quantity x unit price = amount, when the row shows both
             /* If the row shows a quantity and a unit price, keep them: reading
                "17,82 ton x 13,77" beats a flat 245,38 on the booking. They are
@@ -4924,12 +4948,17 @@
         const vatSum = round2(skippedVat.filter(v => Math.abs(v) <= Math.abs(netOfCharges) + 0.01).reduce((a, v) => a + v, 0));
         parsedGroups.forEach(g => {
             /* A carrier invoice repeats the container above every charge block;
-               that is still one container, not three. Merged only when the
-               reference matches too, so two transports of one box stay apart. */
+               that is still one container, not three. Two different references
+               keep them apart - those are two transports of one box - but a
+               block that quotes no reference at all is no reason to split: its
+               charges were then booked on their own, and the second half was
+               turned away as a duplicate of the first. */
             const key = unitKey(g);
-            const same = key && groups.find(x => unitKey(x) === key && x.ref === g.ref);
-            if (same) same.lines.push(...g.lines);
-            else groups.push(g);
+            const same = key && groups.find(x => unitKey(x) === key && (!x.ref || !g.ref || x.ref === g.ref));
+            if (same) {
+                same.lines.push(...g.lines);
+                if (!same.ref && g.ref) same.ref = g.ref;
+            } else groups.push(g);
         });
 
         let statedTotal = null;
@@ -4990,6 +5019,17 @@
                 groups.length = 0;
                 deduped.forEach(g => groups.push(g));
                 calcTotal = dedupTotal;
+            }
+        }
+
+        /* A transport can be left with nothing: its only charge turns out to be
+           the invoice total, or a repeat of a line already counted. What remains
+           is a container with no charges, and booking that wrote an empty line
+           of 0,00 onto a real shipment. */
+        for (let i = groups.length - 1; i >= 0; i--) {
+            if (!groups[i].lines.length) {
+                log(`Dropping ${unitKey(groups[i]) || groups[i].ref || 'a transport'}: no charges left on it`);
+                groups.splice(i, 1);
             }
         }
 
