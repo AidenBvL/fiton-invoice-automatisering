@@ -4006,8 +4006,33 @@
         return -1;
     }
 
+    /* The escapes a PDF string can carry: octal, the punctuation, and the
+       control letters. Cosco needs the last: with its two-byte font the glyph
+       for "%" is 8 and for ")" is 12, written as \b and \f. */
+    const PDF_ESCAPE = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' };
     const unescapePdf = t => t.replace(/\\(\d{1,3})/g, (m, o) => String.fromCharCode(parseInt(o, 8)))
-                             .replace(/\\([()\\])/g, '$1');
+                             .replace(/\\\r?\n/g, '')
+                             .replace(/\\([()\\nrtbf])/g, (m, c) => PDF_ESCAPE[c] || c);
+
+    /* A "( ... )" string of a two-byte font. Cosco writes its Identity-H text
+       as plain strings rather than hex: "( 2 5 , * , 1 $ /)Tj" is ORIGINAL,
+       every glyph number two bytes with a NUL in front, and the amounts are
+       control characters. Without the font's table applied here as well the
+       page read as punctuation, and no charge survived. A string is taken as
+       glyph numbers only when every pair is in the table: a single-byte font
+       that carries a table of its own would otherwise have "Hello" read as the
+       one glyph 0x6F. */
+    function decodeLiteralString(raw, glyphs) {
+        const text = unescapePdf(raw);
+        if (!glyphs || !glyphs.size || !text.length || text.length % 2) return text;
+        let out = '';
+        for (let i = 0; i < text.length; i += 2) {
+            const code = (text.charCodeAt(i) << 8) | text.charCodeAt(i + 1);
+            if (!glyphs.has(code)) return text;
+            out += glyphs.get(code);
+        }
+        return out;
+    }
 
     /* Decodes <00480065> style strings. With an Identity-H font these are glyph
        numbers, two bytes each, and only the font's own table says which letter
@@ -4060,14 +4085,14 @@
             else if (m[2] !== undefined) {                  // [ ... ] TJ
                 let text = '';
                 for (const part of m[2].matchAll(/\(((?:[^)\\]|\\.)*)\)|<([0-9A-Fa-f\s]+)>|(-?\d+(?:\.\d+)?)/g)) {
-                    if (part[1] !== undefined) text += unescapePdf(part[1]);
+                    if (part[1] !== undefined) text += decodeLiteralString(part[1], glyphs);
                     else if (part[2] !== undefined) text += decodeHexString(part[2], glyphs);
                     else if (parseFloat(part[3]) < -100) text += ' ';   // wide kern = column gap
                 }
                 if (text.trim()) frags.push({ x, y, text });
             }
             else if (m[3] !== undefined) {                  // ( ... ) Tj
-                const text = unescapePdf(m[3]);
+                const text = decodeLiteralString(m[3], glyphs);
                 if (text.trim()) frags.push({ x, y, text });
             }
             else if (m[4] !== undefined) {                  // < ... > Tj
@@ -4412,7 +4437,8 @@
         { re: /\bkcb\b|kwaliteits.?controle/i,                                led: () => LEDGER.kcb },
         { re: /gas ?measurement|gasmeting|gasmeet/i,                           led: () => LEDGER.gasMeasurement },
         { re: /fumigat/i,                                                      led: () => LEDGER.fumigation },
-        { re: /customs inspection|x-?ray|scan(ning)? ?fee|physical inspection/i, led: () => LEDGER.customsInsp },
+        // Cosco abbreviates to "CUSTMS INSP FEE"
+        { re: /customs insp|custms insp|x-?ray|scan(ning)? ?fee|physical inspection/i, led: () => LEDGER.customsInsp },
         { re: /customs fine|boete/i,                                           led: () => LEDGER.customsFine },
         { re: /no ?show/i,                                                     led: () => LEDGER.noShow },
 
@@ -4423,7 +4449,7 @@
         { re: /export (document|declaration)|uitvoeraangifte|aangifte ten uitvoer/i, led: () => LEDGER.exportDoc },
         { re: /certificate of origin|eur-?1/i,                                 led: () => LEDGER.certOrigin },
         { re: /fiscal represent|fiscaal vertegenw/i,                           led: () => LEDGER.fiscalRep },
-        { re: /doc(umentation)? ?fee|i\/b doc|doc fee|documentatie|ched|cved|ggb|seal|zegel|printing|documents to driver|delivery order|bill of lading fee|telex release/i, led: () => LEDGER.docs },
+        { re: /doc(umentation)? ?fee|i\/b doc|doc fee|documentatie|ched|cved|ggb|seal|zegel|printing|documents to driver|delivery order|bill of lading fee|telex release|secure release/i, led: () => LEDGER.docs },
 
         // carrier and terminal charges
         { re: /terminal handling|(^|\b)thc\b|dthc|dest trml|terminal handling service/i, led: () => LEDGER.thc },
@@ -4901,7 +4927,11 @@
                 return out;
             };
 
-            const letters = t => (String(t).match(/[a-z]/gi) || []).length;
+            /* A currency code is not wording. With it counted, "Port Security
+               Charge 1 8.5000 EUR 1.00000 0%" beat "Port Security Charge" by
+               the three letters of EUR, and Cosco's column values were booked
+               as part of every description. */
+            const letters = t => (String(t).replace(CURRENCY_RE, '').match(/[a-z]/gi) || []).length;
             const candidates = [
                 cleanDescription(leadingCells(left).join(' '), strip),
                 cleanDescription(leadingCells(right).join(' '), strip),
@@ -5389,7 +5419,37 @@
             if (candidates.length) statedTotal = round2(Math.max(...candidates));
         }
 
-        let invoiceNo = String(firstMatch(text, [
+        /* The number standing beside its label. Cosco boxes "INVOICE NO." in
+           the header with the number to its right, on a baseline a point and a
+           half higher - another row to us - while the cargo description further
+           down quotes the shipper's own "INVOICE NO: 912601382" inline. Read as
+           flat text, that inline one was found first. A cell that is exactly
+           the label, with an invoice number as the next cell on the same line
+           of the page, is what the document itself calls its invoice number,
+           so it comes before any pattern in the text. Pasted text has no
+           positions (every row at y 0), so there only the row itself counts. */
+        const besideLabel = (labelRe, valueRe) => {
+            for (let i = 0; i < rows.length; i++) {
+                const label = rows[i].cells.find(c => labelRe.test(c.text.trim()));
+                if (!label) continue;
+                const beside = [];
+                for (let k = i - 2; k <= i + 2; k++) {
+                    const r = rows[k];
+                    if (!r) continue;
+                    if (k !== i && (!r.y || Math.abs(r.y - rows[i].y) > 2.5)) continue;
+                    r.cells.forEach(c => { if (c.x > label.x + 1) beside.push(c); });
+                }
+                const next = beside.sort((a, b) => a.x - b.x)[0];
+                if (next && valueRe.test(next.text.trim())) return next.text.trim();
+            }
+            return '';
+        };
+        let invoiceNo = besideLabel(
+            /^(invoice\s*(no|nr|number)\.?|factuurnummer|factuurnr\.?|document\s*n[°o]\.?)\s*:?$/i,
+            /^[A-Z0-9][A-Z0-9\/-]{4,}$/);
+        if (invoiceNo && (!/\d{3}/.test(invoiceNo) || /^[A-Z]{2}\d{9}B\d{2}$/i.test(invoiceNo))) invoiceNo = '';
+
+        if (!invoiceNo) invoiceNo = String(firstMatch(text, [
             /Factuurnr\.?:?\s*([A-Z0-9\/-]{4,})/i,
             /Factuurnummer\s*:?\s*([A-Z0-9\/-]{4,})/i,
             /Invoice\s*(?:no|nr|number)\.?\s*:?\s*([A-Z0-9\/-]{4,})/i,
