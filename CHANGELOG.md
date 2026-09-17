@@ -1,5 +1,27 @@
 # Wat er veranderd is
 
+## 9.21.1
+
+**Een wegzending op een dienstenspecificatie werd overgeslagen.** Lineage zet bij
+een wegzending een trailernummer waar bij een zeezending een container staat —
+`Ref.: 2002003905 Container: 21026` — en 21026 bewijst met z'n vorm niets, dus er
+werd geen eenheid herkend en geen blok geopend. De kosten van die zending vielen
+daardoor bij het blok erboven: € 404,70 aan wegkosten werd meegeboekt op
+zeezending 1002002053, die daarmee op € 1.091,48 uitkwam in plaats van € 686,78.
+Een regel zonder bedrag die een van onze eigen zendingnummers noemt, opent nu een
+eigen blok.
+
+Daarbij hoort: een container die één keer in de kop staat geldt alleen voor het
+hele document als géén enkel blok er zelf een noemt. Op een specificatie waar elk
+blok z'n eigen container draagt, zou het blok met een trailer anders de eerste
+container van de pagina krijgen en als díé zending worden opgezocht.
+
+**Tonnages verloren hun derde decimaal.** `22,862 Ton` werd `22,86`, en daarmee
+klopte de regel niet meer: 22,86 × 13,77 is € 314,78, terwijl de factuur € 314,81
+zegt. Een aantal wordt nu op drie decimalen bewaard — een tonnage wordt tot op de
+kilo gewogen. Op de specificatie waar dit op viel kloppen nu alle 47 regels:
+aantal × stuksprijs is precies het bedrag op de factuur.
+
 ## 9.21.0
 
 **Facturen die verkeerd gelezen werden.** Allemaal gevonden op echte facturen,

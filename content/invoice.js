@@ -938,6 +938,10 @@
        ========================================================================= */
 
     const round2 = n => parseFloat(Number(n).toFixed(2));
+    /* Quantities are not amounts: a tonnage is weighed to the kilo, and cutting
+       22,862 Ton back to 22,86 both loses the weight and stops the line adding
+       up - 22,86 x 13,77 is 314,78, where the invoice says 314,81. */
+    const round3 = n => parseFloat(Number(n).toFixed(3));
     const money = n => CURRENCY_SYMBOL + Number(n).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -4604,7 +4608,17 @@
                     const rest = row.raw.replace(unit.text, '');
                     const rm = new RegExp(SHIPMENT_ID_RE.source).exec(rest) || REF_ANY.exec(rest);
                     newGroup(unit, rm ? rm[1] : '', headingOf(rows[rowIndex - 1]));
+                    return;
                 }
+                /* A road shipment on a specification carries a trailer number
+                   where a sea one carries a container - "Ref.: 2002003905
+                   Container: 21026" - and 21026 proves nothing by its shape, so
+                   no unit was recognised and no block was opened. Its charges
+                   then fell to the block above it and a whole road shipment was
+                   booked onto the sea shipment before it. A row with no amount
+                   that quotes one of our own shipment numbers opens a block. */
+                const shipment = new RegExp(SHIPMENT_ID_RE.source).exec(row.raw);
+                if (shipment) newGroup(null, shipment[1], headingOf(rows[rowIndex - 1]));
                 return;
             }
 
@@ -4742,7 +4756,7 @@
             else if (unit && !current.unit) current.unit = unit;
             if (unit && unit.kind === 'container' && !current.container) current.container = unit.value;
             current.lines.push({
-                desc, qty: round2(qty), unitPrice: round2(unitPrice), amount: round2(amount),
+                desc, qty: round3(qty), unitPrice: round2(unitPrice), amount: round2(amount),
                 row: row.raw, sheet: row.sheet,
                 // A charge row that carries the unit is the transport line itself,
                 // which is worth knowing when nothing in its wording says so
@@ -4930,7 +4944,7 @@
                 }
             }
         }
-        return { desc, qty: round2(qty), unitPrice: round2(unitPrice), amount: round2(amount) };
+        return { desc, qty: round3(qty), unitPrice: round2(unitPrice), amount: round2(amount) };
     }
 
     function firstMatch(text, patterns) {
@@ -5189,11 +5203,17 @@
            one. A container keeps its old reach: every group without one. */
         const docUnit = unitIn(text);
         const docModality = modalityFromWords(text);
+        /* A container named once in the header stands for the whole document -
+           but only where no block named one of its own. On a specification where
+           every block carries its own container, the block that carries a
+           trailer instead would otherwise be handed the first container on the
+           page and looked up as that shipment. */
+        const mayInherit = groups.length === 1 || !groups.some(g => g.container);
         groups.forEach(g => {
             if (!g.ref && pageShipment) g.ref = pageShipment;
             if (!g.ref && labelledRef) g.ref = labelledRef[1];
-            if (docUnit && docUnit.kind === 'container' && !g.container) g.container = docUnit.value;
-            if (docUnit && !g.unit && (docUnit.kind === 'container' || groups.length === 1)) g.unit = docUnit;
+            if (docUnit && docUnit.kind === 'container' && !g.container && mayInherit) g.container = docUnit.value;
+            if (docUnit && !g.unit && mayInherit && (docUnit.kind === 'container' || groups.length === 1)) g.unit = docUnit;
             g.modality = modalityOf(g, docModality);
         });
 
