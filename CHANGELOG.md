@@ -1,5 +1,36 @@
 # Wat er veranderd is
 
+## 9.22.1
+
+**Cosco-facturen werden niet gelezen.** Een Cosco-factuur gaf *Geen kostenregels
+herkend in dit document*, terwijl er zes kostenregels en een totaal op staan.
+Cosco schrijft zijn tekst met een tweebytes-lettertype (Identity-H), maar als
+gewone `( … )`-strings in plaats van als hex — en alleen hex-strings gingen door
+de glyph-tabel van het lettertype. Daardoor kwam ORIGINAL binnen als `25,*,1$/`,
+en de bedragen als stuurtekens: geen letters, geen bedragen, geen regels. Zo'n
+string gaat nu ook door de tabel, en alleen wanneer élk tekenpaar erin staat,
+zodat een lettertype met enkelbyte-codes en een eigen tabel er niets van merkt.
+Daarbij worden nu ook de `\b`- en `\f`-escapes gelezen, want bij Cosco zijn dat
+de glyphs voor `%` en `)`.
+
+**Het factuurnummer rechtsboven.** Cosco zet *INVOICE NO.* in een kader met het
+nummer ernaast, anderhalve punt hoger op de pagina — voor ons een andere regel —
+terwijl lager in de goederenomschrijving het eigen factuurnummer van de shipper
+staat (`INVOICE NO: 912601382`). Als platte tekst werd díé het eerst gevonden.
+Een cel die precies het label is, met een factuurnummer als eerstvolgende cel op
+dezelfde regel van de pagina, is nu wat het document zelf zijn factuurnummer
+noemt, en gaat vóór elk patroon in de tekst: 3086658819.
+
+**Omschrijvingen sleepten de kolommen mee.** `Port Security Charge 1 8.5000 EUR
+1.00000 0%` in plaats van `Port Security Charge`: de volle regel won van de korte
+door de drie letters van EUR. Een valutacode telt niet meer als tekst.
+
+**Grootboek.** Cosco's `CUSTMS INSP FEE` gaat naar 5105 Customs Inspection en
+*Secure Release Fee* naar 4945 Documentation Fee; de andere vier vielen al goed
+(Port/Carrier Security Charge op 4985, DEST TRML HANDLG op 4959, DEST. DOC FEE op
+4945). De factuur leest nu als zes regels op container OTPU6156590, € 418,00,
+exact gelijk aan het totaal op de factuur.
+
 ## 9.22.0
 
 **Het eindrapport is er een om door te sturen.** Kopiëren gaf een rij
