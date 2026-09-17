@@ -1,5 +1,33 @@
 # Wat er veranderd is
 
+## 9.22.0
+
+**Het eindrapport is er een om door te sturen.** Kopiëren gaf een rij
+tab-gescheiden velden — prima voor Excel, maar niet iets dat je aan de
+boekhouding mailt. Er komt nu een uitgeschreven rapport uit, op een vaste breedte
+zodat het een plakbeurt in een mail of een ticket overleeft:
+
+- een kop met factuur, crediteur, factuurtotaal, wie hem inlas, wanneer en hoe
+  lang het duurde;
+- een resultaatblok met geboekt, overgeslagen en niet gelukt — elk met zijn
+  aantal én zijn bedrag, want een aantal alleen zegt niet of er nog € 4.000 op
+  een mislukking staat;
+- bij meerdere facturen in één run een regel per factuur met wat ervan geboekt
+  is;
+- en daarna elke zending onder het kopje van wat ermee gebeurd is, met z'n
+  kostenregels eronder — in plaats van één platte tabel waarin een overgeslagen
+  regel er hetzelfde uitziet als een geboekte.
+
+**En in het Engels.** Naast *Kopieer rapport* staat *Copy in English*: hetzelfde
+rapport, vertaald, met Engelse getalnotatie en Engelse datums. Ook de reden
+waarom een zending is overgeslagen of niet gelukt — die wordt nu naast de
+Nederlandse zin als code vastgelegd, zodat het Engelse rapport er zijn eigen zin
+van maakt in plaats van er "geen zoekresultaat" in te laten staan.
+
+**Het rapport op het scherm** toont in de samenvatting per uitkomst ook het
+bedrag, en een factuur waarvan de leverancier geen nummer afdrukt is nu aan zijn
+bestandsnaam te herkennen in plaats van aan een streepje.
+
 ## 9.21.1
 
 **Een wegzending op een dienstenspecificatie werd overgeslagen.** Lineage zet bij

@@ -1329,6 +1329,17 @@
             padding: 10px 0 12px; border-bottom: 1px solid var(--fip-border); margin-bottom: 10px;
         }
         .fip-report-summary b { color: var(--fip-text); font-size: 14px; }
+        /* Each outcome as a block of its own, with its money under it, so the
+           eye lands on "niet gelukt 441,62" rather than counting badges. */
+        .fip-report-summary > span {
+            display: flex; flex-direction: column; gap: 1px;
+            padding-left: 10px; border-left: 3px solid var(--fip-border);
+        }
+        .fip-report-summary .fip-sum { color: var(--fip-text); font-variant-numeric: tabular-nums; }
+        .fip-report-summary .is-ok { border-left-color: #16a34a; }
+        .fip-report-summary .is-warn { border-left-color: #f59e0b; }
+        .fip-report-summary .is-bad { border-left-color: var(--fip-danger); }
+        .fip-ask-actions .fip-hint { align-self: center; max-width: 300px; }
         /* Sideways too: the shipment column makes this table wider than the box. */
         .fip-report-scroll { max-height: 45vh; overflow: auto; }
         .fip-badge { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
@@ -2515,6 +2526,222 @@
         btn.style.display = 'block';
     }
 
+    /* =========================================================================
+       THE END REPORT AS TEXT
+       -------------------------------------------------------------------------
+       The report on screen is for the person who just booked; this is the one
+       that gets pasted into a mail to bookkeeping, who were not there and read
+       it cold. So it names the invoice, who read it in and when, says what went
+       through and what did not, and then lists every shipment with its charges
+       under the heading of what happened to it - rather than one flat table
+       where a skipped line looks like a booked one.
+
+       Plain text, aligned on a fixed width, so it survives a paste into a mail
+       or a ticket. In English too: not everybody who has to read it speaks
+       Dutch, and a translated afterthought in the mail body is how numbers get
+       repeated wrongly.
+       ========================================================================= */
+    const REPORT_WORDS = {
+        nl: {
+            title: 'FITON — BOEKRAPPORT', locale: 'nl-NL',
+            invoice: 'Factuur', invoices: 'Facturen', creditor: 'Crediteur',
+            invoiceTotal: 'Factuurtotaal', readBy: 'Ingelezen door', when: 'Datum',
+            took: 'Duur', descMode: 'Omschrijving',
+            perInvoice: 'PER FACTUUR', result: 'RESULTAAT',
+            booked: 'Geboekt', skipped: 'Overgeslagen', notDone: 'Niet gelukt', total: 'Totaal',
+            sectionBooked: 'GEBOEKT', sectionSkipped: 'OVERGESLAGEN', sectionNotDone: 'NIET GELUKT',
+            shipment: 'Shipment', reason: 'Reden', noCharges: 'geen kostenregels',
+            one: 'zending', many: 'zendingen', lineOne: 'regel', lineMany: 'regels',
+            minutes: 'min', seconds: 'sec', nothing: 'niets',
+            footer: 'Gemaakt door FitOn Invoice Automation'
+        },
+        en: {
+            title: 'FITON — BOOKING REPORT', locale: 'en-GB',
+            invoice: 'Invoice', invoices: 'Invoices', creditor: 'Supplier',
+            invoiceTotal: 'Invoice total', readBy: 'Read in by', when: 'Date',
+            took: 'Duration', descMode: 'Description',
+            perInvoice: 'PER INVOICE', result: 'RESULT',
+            booked: 'Booked', skipped: 'Skipped', notDone: 'Not booked', total: 'Total',
+            sectionBooked: 'BOOKED', sectionSkipped: 'SKIPPED', sectionNotDone: 'NOT BOOKED',
+            shipment: 'Shipment', reason: 'Reason', noCharges: 'no charge lines',
+            one: 'shipment', many: 'shipments', lineOne: 'line', lineMany: 'lines',
+            minutes: 'min', seconds: 'sec', nothing: 'none',
+            footer: 'Produced by FitOn Invoice Automation'
+        }
+    };
+
+    const DESC_MODE_WORDS = {
+        nl: { both: 'Factuur + zending + kostensoort', invoice: 'Factuur + zending',
+              invoiceOnly: 'Alleen factuurnummer', name: 'Alleen kostensoort' },
+        en: { both: 'Invoice + shipment + charge', invoice: 'Invoice + shipment',
+              invoiceOnly: 'Invoice number only', name: 'Charge only' }
+    };
+
+    const MODALITY_EN = { sea: 'Ocean freight', road: 'Road transport', rail: 'Rail transport', air: 'Air freight' };
+    const STATUS_WORDS = {
+        nl: { done: 'Geboekt', duplicate: 'Overgeslagen', notfound: 'Niet gevonden',
+              failed: 'Mislukt', pending: 'Niet verwerkt', booking: 'Onbekend' },
+        en: { done: 'Booked', duplicate: 'Skipped', notfound: 'Not found',
+              failed: 'Failed', pending: 'Not processed', booking: 'Unknown' }
+    };
+
+    /* The English report writes its own sentence from the code rather than
+       showing the Dutch one; a reason with no code falls back to what was
+       recorded, so nothing is ever lost. */
+    const UNIT_LABEL_TEXT = { container: 'container number', bl: 'B/L', awb: 'AWB',
+        wagon: 'wagon number', trailer: 'trailer number', plate: 'licence plate', cmr: 'CMR number' };
+
+    const REASON_EN = {
+        invoiceOnShipment: a => `Invoice ${a.invoice} is already on this shipment`
+            + (a.quote ? `: "${a.quote}"` : ''),
+        amountOnShipment: a => `Possibly booked already: a cost line of ${a.amount != null ? money(a.amount) : ''} is already on this shipment`
+            + (a.quote ? ` — "${a.quote}"` : ''),
+        amountsOnShipment: a => a.count > 1
+            ? `Possibly booked already: all ${a.count} amounts of this invoice are already on this shipment`
+            : `Possibly booked already: the amount ${a.amount != null ? money(a.amount) : ''} of this invoice is already on this shipment`,
+        noSearchKey: () => 'No container, unit or reference on this line',
+        noUnitField: a => `No search field for ${UNIT_LABEL_TEXT[a.kind] || 'this unit'} on the search page`
+            + (a.value ? ` — look ${a.value} up by hand` : ''),
+        noShipmentField: () => 'Search field "Shipment id" not found on the search page',
+        noDataFound: a => `FitOn reports "no data found" for `
+            + (a.by === 'container' ? 'this container number'
+             : a.by === 'shipment' ? 'this shipment id'
+             : a.by === 'unit' ? `${UNIT_LABEL_TEXT[a.kind] || 'this unit'} ${a.value || ''}`.trim()
+             : 'this reference'),
+        noResult: a => `No search result within ${a.seconds || 12} seconds`,
+        blindCheck: () => 'Duplicate check not possible (description carries no invoice number)',
+        aborted: () => 'Booking stopped — check the shipment'
+    };
+
+    const reasonIn = (item, lang) => {
+        const build = lang === 'en' && REASON_EN[item.reasonCode];
+        return (build && build(item.reasonArgs || {})) || item.reason || '';
+    };
+
+    function worklistReportText(w, lang) {
+        const t = REPORT_WORDS[lang] || REPORT_WORDS.nl;
+        const W = 76;
+        const rule = ch => ch.repeat(W);
+        const pad = (s, n) => { s = String(s); return s.length >= n ? s : s + ' '.repeat(n - s.length); };
+        const padL = (s, n) => { s = String(s); return s.length >= n ? s : ' '.repeat(n - s.length) + s; };
+        const clip = (s, n) => { s = String(s == null ? '' : s); return s.length <= n ? s : s.slice(0, n - 1) + '…'; };
+        /* An amount always carries its cents; a quantity carries as many
+           decimals as it has, up to the three a tonnage needs. The currency
+           sign stays put and the digits line up under each other, which is how
+           a column of money is read. */
+        const dec = n => Number(n || 0).toLocaleString(t.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const qty = n => Number(n || 0).toLocaleString(t.locale, { maximumFractionDigits: 3 });
+        const cash = n => `${CURRENCY_SYMBOL} ${dec(n)}`;
+        const cashCol = n => `${CURRENCY_SYMBOL} ${padL(dec(n), 11)}`;
+        const field = (label, value) => `  ${pad(label, 17)}${value}`;
+        const countOf = n => `${n} ${n === 1 ? t.one : t.many}`;
+
+        const out = [];
+        const blank = () => { if (out[out.length - 1] !== '') out.push(''); };
+
+        /* ---- who this is about ---- */
+        const invoices = worklistInvoices(w);
+        const many = invoices.length > 1;
+        const items = w.items || [];
+        const sum = list => round2(list.reduce((a, i) => a + (Number(i.total) || 0), 0));
+        const itemsOf = inv => items.filter(i => invoiceKey(w, i) === (inv.docId || inv.invoiceNo || ''));
+        /* Not every supplier prints a number we can find. Naming the file it
+           came from still lets a reader put the amount back with a document. */
+        const nameOf = inv => inv.invoiceNo || inv.docName || w.fileName || '—';
+
+        out.push(rule('='), `  ${t.title}`, rule('='), '');
+        if (many) {
+            out.push(field(t.invoices, String(invoices.length)));
+        } else {
+            const only = invoices[0] || {};
+            out.push(field(t.invoice, nameOf(only)));
+            out.push(field(t.creditor, [only.creditorName, only.creditorSeq && `(${only.creditorSeq})`]
+                .filter(Boolean).join(' ') || '—'));
+        }
+        out.push(field(t.invoiceTotal, cash(many || w.amount == null ? sum(items) : w.amount)));
+        if (w.user) out.push(field(t.readBy, w.user));
+        out.push(field(t.when, new Date(w.startedAt || Date.now()).toLocaleString(t.locale,
+            { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            .replace(',', '')));
+        if (w.startedAt) {
+            const secs = Math.max(0, Math.round((Date.now() - w.startedAt) / 1000));
+            out.push(field(t.took, secs >= 90 ? `${Math.round(secs / 60)} ${t.minutes}` : `${secs} ${t.seconds}`));
+        }
+        out.push(field(t.descMode, (DESC_MODE_WORDS[lang] || DESC_MODE_WORDS.nl)[w.descMode] || '—'));
+
+        /* ---- what happened ---- */
+        const groups = [
+            { key: 'booked',  label: t.booked,  section: t.sectionBooked,  has: i => i.status === 'done' },
+            { key: 'skipped', label: t.skipped, section: t.sectionSkipped, has: i => i.status === 'duplicate' },
+            { key: 'notDone', label: t.notDone, section: t.sectionNotDone, has: i => i.status !== 'done' && i.status !== 'duplicate' }
+        ].map(g => Object.assign(g, { items: items.filter(g.has) }));
+
+        const tally = (label, n, amount) =>
+            `  ${pad(label, 17)}${padL(n, 3)}  ${pad(n === 1 ? t.one : t.many, 12)}${cashCol(amount)}`;
+        blank();
+        out.push(rule('-'), `  ${t.result}`, rule('-'), '');
+        groups.forEach(g => {
+            if (g.items.length) out.push(tally(g.label, g.items.length, sum(g.items)));
+        });
+        out.push(`  ${pad('', 17)}${padL('---', 3)}  ${pad('', 12)}  ${'-'.repeat(11)}`);
+        out.push(tally(t.total, items.length, sum(items)));
+
+        /* ---- per invoice, when several went in at once ---- */
+        if (many) {
+            blank();
+            out.push(rule('-'), `  ${t.perInvoice}`, rule('-'), '');
+            invoices.forEach(inv => {
+                const mine = itemsOf(inv);
+                const okCount = mine.filter(i => i.status === 'done').length;
+                out.push(`  ${pad(clip(nameOf(inv), 16), 17)}${pad(clip(inv.creditorName || '', 34), 35)}`
+                    + `${padL(`${okCount}/${mine.length}`, 7)}  ${cashCol(sum(mine))}`);
+            });
+        }
+
+        /* ---- every shipment, under what happened to it ---- */
+        groups.forEach(g => {
+            if (!g.items.length) return;
+            blank();
+            out.push(rule('-'));
+            out.push(`  ${g.section}  (${countOf(g.items.length)}, ${cash(sum(g.items))})`);
+            out.push(rule('-'), '');
+
+            g.items.forEach(i => {
+                out.push(`  ${pad(clip(transportName(i) || '—', 60), 61)}${cashCol(i.total)}`);
+
+                /* Under the name, what it is and where it landed. The shipment
+                   number is only repeated when it is not already the name or
+                   the reference the invoice quoted. */
+                const inv = itemInvoice(w, i);
+                const facts = transportFacts(i, lang);
+                if (i.shipmentNo && i.shipmentNo !== i.ref && i.shipmentNo !== transportName(i)) {
+                    facts.push(`${t.shipment} ${i.shipmentNo}`);
+                }
+                const lines = i.lines || [];
+                const shown = i.bookedLines || (w.combine ? 1 : lines.length);
+                if (shown) facts.push(`${shown} ${shown === 1 ? t.lineOne : t.lineMany}`);
+                // With several invoices in one run the invoice gets a line to
+                // itself, or it is the first thing the clipping cuts off.
+                if (many) out.push(`     ${t.invoice} ${clip(nameOf(Object.assign({ docName: i.docName }, inv)), 62)}`);
+                if (facts.length) out.push(`     ${clip(facts.join(' · '), 69)}`);
+                const why = reasonIn(i, lang);
+                if (why) out.push(`     ${t.reason}: ${clip(why, 63)}`);
+
+                lines.forEach(l => {
+                    const rate = Number(l.qty) === 1 ? '' : `${qty(l.qty)} × ${dec(l.unitPrice)}`;
+                    out.push(`       ${pad(clip(l.desc, 42), 43)}${padL(rate, 15)}${padL(dec(l.amount), 11)}`);
+                });
+                if (!lines.length) out.push(`       ${t.noCharges}`);
+                out.push('');
+            });
+        });
+
+        blank();
+        out.push(rule('='));
+        out.push(`  ${t.footer} v${VERSION}`);
+        return out.join('\n');
+    }
+
     function showWorklistReport(w) {
         if (document.querySelector('.fip-ask')) return;
 
@@ -2526,8 +2753,15 @@
             pending:   { text: 'Niet verwerkt',  cls: 'warn' },
             booking:   { text: 'Onbekend',       cls: 'warn' }
         };
-        const count = st => w.items.filter(i => i.status === st).length;
-        const bookedSum = w.items.filter(i => i.status === 'done').reduce((a, i) => a + i.total, 0);
+        /* What went through, what was left alone and what did not work, each
+           with its money: a count on its own does not say whether the evening
+           is finished or whether 4.000 euro is still sitting on a failure. */
+        const sumOf = test => round2(w.items.filter(test).reduce((a, i) => a + (Number(i.total) || 0), 0));
+        const groupsOf = [
+            { label: 'geboekt',      cls: 'ok',   test: i => i.status === 'done' },
+            { label: 'overgeslagen', cls: 'warn', test: i => i.status === 'duplicate' },
+            { label: 'niet gelukt',  cls: 'bad',  test: i => i.status !== 'done' && i.status !== 'duplicate' }
+        ].map(g => Object.assign(g, { n: w.items.filter(g.test).length, sum: sumOf(g.test) }));
         const lineCount = i => i.bookedLines || (w.combine ? 1 : (i.lines || []).length) || '';
         const chargeNames = i => [...new Set((i.lines || []).map(l => l.desc).filter(Boolean))];
 
@@ -2536,13 +2770,14 @@
            have, and what was on the invoice for it. */
         const invoices = worklistInvoices(w);
         const many = invoices.length > 1;
+        const nameOf = inv => (inv && (inv.invoiceNo || inv.docName)) || w.fileName || '—';
         const rows = w.items.map(i => {
             const l = LABEL[i.status] || LABEL.pending;
             const facts = transportFacts(i);
             const names = chargeNames(i);
             const inv = itemInvoice(w, i);
             return `<tr>
-                ${many ? `<td><b>${esc(inv.invoiceNo || '—')}</b>${inv.creditorName ? `<div class="fip-ledger">${esc(inv.creditorName)}</div>` : ''}</td>` : ''}
+                ${many ? `<td><b>${esc(inv.invoiceNo || i.docName || '—')}</b>${inv.creditorName ? `<div class="fip-ledger">${esc(inv.creditorName)}</div>` : ''}</td>` : ''}
                 <td><b>${esc(transportName(i) || '—')}</b>${facts.length ? `<div class="fip-ledger">${esc(facts.join(' · '))}</div>` : ''}</td>
                 <td>${i.shipmentNo ? `<b>${esc(i.shipmentNo)}</b>` : '<span class="fip-ledger">—</span>'}</td>
                 <td class="fip-reason">${names.length ? esc(names.slice(0, 3).join(', ')) + (names.length > 3 ? ` +${names.length - 3}` : '') : '—'}</td>
@@ -2553,7 +2788,7 @@
             </tr>`;
         }).join('');
         const head = many
-            ? invoices.map(i => [i.invoiceNo || '?', i.creditorName].filter(Boolean).join(' — ')).join(' · ')
+            ? invoices.map(i => [nameOf(i), i.creditorName].filter(Boolean).join(' — ')).join(' · ')
             : [w.creditor || w.creditorName, w.amount != null ? `factuurtotaal ${money(w.amount)}` : '']
                 .filter(Boolean).join(' · ');
 
@@ -2561,13 +2796,13 @@
         overlay.className = 'fip-ask fip-root';
         overlay.innerHTML = `
             <div class="fip-ask-box" style="max-width:880px;">
-                <div class="fip-ask-title">Eindrapport — ${many ? `${invoices.length} facturen` : `factuur ${esc((invoices[0] && invoices[0].invoiceNo) || w.invoiceNo || '')}`}</div>
+                <div class="fip-ask-title">Eindrapport — ${many ? `${invoices.length} facturen` : `factuur ${esc(nameOf(invoices[0]))}`}</div>
                 ${head ? `<div class="fip-hint" style="margin:-4px 0 8px;">${esc(head)}</div>` : ''}
                 <div class="fip-report-summary">
-                    <span><b>${count('done')}</b> geboekt (${money(bookedSum)})</span>
-                    <span><b>${count('duplicate')}</b> overgeslagen</span>
-                    <span><b>${count('notfound') + count('failed')}</b> niet gelukt</span>
-                    <span><b>${w.items.length}</b> totaal${many ? ` uit <b>${invoices.length}</b> facturen` : ''}</span>
+                    ${groupsOf.filter(g => g.n).map(g => `<span class="is-${g.cls}"><b>${g.n}</b> ${g.label}
+                        <span class="fip-sum">${money(g.sum)}</span></span>`).join('')}
+                    <span><b>${w.items.length}</b> zendingen${many ? ` uit <b>${invoices.length}</b> facturen` : ''}
+                        <span class="fip-sum">${money(sumOf(() => true))}</span></span>
                 </div>
                 <div class="fip-report-scroll">
                     <table class="fip-table">
@@ -2576,7 +2811,10 @@
                     </table>
                 </div>
                 <div class="fip-ask-actions">
-                    <button type="button" class="fip-btn fip-btn-ghost" data-act="copy">Rapport kopiëren</button>
+                    <span class="fip-hint" style="margin-right:auto;">Kopiëren geeft een uitgeschreven rapport,
+                        klaar om door te sturen.</span>
+                    <button type="button" class="fip-btn fip-btn-ghost" data-act="copy" data-lang="nl">Kopieer rapport</button>
+                    <button type="button" class="fip-btn fip-btn-ghost" data-act="copy" data-lang="en">Copy in English</button>
                     <button type="button" class="fip-btn fip-btn-primary" data-act="close">Sluiten</button>
                 </div>
             </div>`;
@@ -2587,23 +2825,15 @@
             const act = (e.target.closest('[data-act]') || {}).dataset;
             if (act && act.act === 'close') close();
             if (act && act.act === 'copy') {
-                const unitOf = i => i.container ? 'Container' : i.unit && UNIT_KINDS[i.unit.kind] ? UNIT_KINDS[i.unit.kind].label : '';
-                const tsv = [(many ? 'Factuur\tCrediteur\t' : '')
-                        + 'Zending\tShipment\tEenheid\tSoort vervoer\tReferentie\tKosten\tRegels\tBedrag\tResultaat\tReden']
-                    .concat(w.items.map(i => {
-                        const inv = itemInvoice(w, i);
-                        return (many ? [inv.invoiceNo, inv.creditorName] : []).concat([
-                            transportName(i), i.shipmentNo || '', unitOf(i), MODALITY[modalityOf(i, i.modality)] || '',
-                            i.ref || '', chargeNames(i).join(', '), lineCount(i),
-                            i.total.toFixed(2).replace('.', ','),
-                            (LABEL[i.status] || LABEL.pending).text, i.reason || '']).join('\t');
-                    }))
-                    .join('\n');
-                navigator.clipboard.writeText(tsv).then(() => {
-                    const b = overlay.querySelector('[data-act="copy"]');
-                    b.textContent = 'Gekopieerd ✓';
-                    setTimeout(() => { b.textContent = 'Rapport kopiëren'; }, 1600);
-                }).catch(() => {});
+                const button = e.target.closest('[data-act="copy"]');
+                const lang = button.getAttribute('data-lang') === 'en' ? 'en' : 'nl';
+                const was = button.textContent;
+                navigator.clipboard.writeText(worklistReportText(w, lang)).then(() => {
+                    button.textContent = lang === 'en' ? 'Copied ✓' : 'Gekopieerd ✓';
+                    setTimeout(() => { button.textContent = was; }, 1800);
+                }).catch(() => fipTell(lang === 'en'
+                    ? 'Copying to the clipboard failed.'
+                    : 'Kopiëren naar het klembord is mislukt.'));
             }
             if (e.target === overlay) close();
         });
@@ -2684,7 +2914,10 @@
         const invoice = ctx.invoiceNo;
         if (invoice.length >= 4) {
             const hit = rows.find(r => r.text.includes(invoice));
-            if (hit) return `Factuur ${invoice} staat al op deze zending: ${quote(hit)}`;
+            if (hit) {
+                return { text: `Factuur ${invoice} staat al op deze zending: ${quote(hit)}`,
+                         code: 'invoiceOnShipment', args: { invoice, quote: hit.text.slice(0, 90) } };
+            }
         }
 
         const lines = (item.lines || []).filter(l => l.amount);
@@ -2695,12 +2928,16 @@
         const several = lines.length >= 2;
 
         const asOne = total ? rows.find(r => has(r, total) && (several || fromCreditor(r))) : null;
-        if (asOne) return `Mogelijk al geboekt: er staat al een kostenregel van ${money(total)} op deze zending — ${quote(asOne)}`;
+        if (asOne) {
+            return { text: `Mogelijk al geboekt: er staat al een kostenregel van ${money(total)} op deze zending — ${quote(asOne)}`,
+                     code: 'amountOnShipment', args: { amount: total, quote: asOne.text.slice(0, 90) } };
+        }
 
         if (lines.length && lines.every(l => rows.some(r => has(r, l.amount) && (several || fromCreditor(r))))) {
-            return `Mogelijk al geboekt: ${several ? `alle ${lines.length} bedragen` : `het bedrag ${money(lines[0].amount)}`} van deze factuur staan al op deze zending`;
+            return { text: `Mogelijk al geboekt: ${several ? `alle ${lines.length} bedragen` : `het bedrag ${money(lines[0].amount)}`} van deze factuur staan al op deze zending`,
+                     code: 'amountsOnShipment', args: { count: lines.length, amount: lines[0].amount } };
         }
-        return '';
+        return null;
     }
 
     /* The rows of the Costs region on a shipment or Financials page, as text. */
@@ -2714,9 +2951,23 @@
         return texts;
     }
 
+    /* Why a line was skipped or did not go through, recorded as a code beside
+       the Dutch sentence. The sentence is what the panel and the Dutch report
+       show; the code is what the English report builds its own sentence from,
+       because bookkeeping abroad cannot do much with "geen zoekresultaat". */
+    function noteReason(item, reason) {
+        if (reason && typeof reason === 'object') {
+            item.reason = reason.text;
+            item.reasonCode = reason.code || '';
+            item.reasonArgs = reason.args || {};
+        } else {
+            item.reason = reason || '';
+        }
+    }
+
     function skipWorklistItem(w, item, reason, who) {
         item.status = 'duplicate';
-        item.reason = reason;
+        noteReason(item, reason);
         w.index++; w.attempts = 0; w.awaitSearch = true;
         saveWorklist(w);
         setSubStatus(`${who} · al geboekt, overgeslagen`);
@@ -2772,7 +3023,7 @@
         const who = transportName(item) || '?';
         if (!searchBy) {
             item.status = 'notfound';
-            item.reason = 'Geen container, eenheid of referentie op deze regel';
+            noteReason(item, { text: 'Geen container, eenheid of referentie op deze regel', code: 'noSearchKey' });
             w.index++; saveWorklist(w);
             setTimeout(runWorklist, 300);
             return;
@@ -2798,9 +3049,10 @@
             if (!field) {
                 if (searchBy !== 'shipment' && searchBy !== 'unit') return;
                 item.status = 'notfound';
-                item.reason = searchBy === 'unit'
-                    ? `Geen zoekveld voor ${UNIT_KINDS[item.unit.kind].label} op de zoekpagina — zoek ${item.unit.value} handmatig`
-                    : 'Zoekveld "Shipment id" niet gevonden op de zoekpagina';
+                noteReason(item, searchBy === 'unit'
+                    ? { text: `Geen zoekveld voor ${UNIT_KINDS[item.unit.kind].label} op de zoekpagina — zoek ${item.unit.value} handmatig`,
+                        code: 'noUnitField', args: { kind: item.unit.kind, value: item.unit.value } }
+                    : { text: 'Zoekveld "Shipment id" niet gevonden op de zoekpagina', code: 'noShipmentField' });
                 w.index++; saveWorklist(w);
                 setTimeout(runWorklist, 300);
                 return;
@@ -2851,11 +3103,14 @@
 
             log(`No shipment found for ${who} after ${Math.round(elapsed / 1000)}s - skipping`);
             item.status = 'notfound';
-            item.reason = noData
-                ? `FitOn meldt "no data found" voor ${searchBy === 'container' ? 'dit containernummer'
-                    : searchBy === 'shipment' ? 'dit shipment id'
-                    : searchBy === 'unit' ? `${UNIT_KINDS[item.unit.kind].label} ${item.unit.value}` : 'deze referentie'}`
-                : `Geen zoekresultaat binnen ${Math.round(SEARCH_WAIT_MS / 1000)} seconden`;
+            noteReason(item, noData
+                ? { text: `FitOn meldt "no data found" voor ${searchBy === 'container' ? 'dit containernummer'
+                        : searchBy === 'shipment' ? 'dit shipment id'
+                        : searchBy === 'unit' ? `${UNIT_KINDS[item.unit.kind].label} ${item.unit.value}` : 'deze referentie'}`,
+                    code: 'noDataFound', args: { by: searchBy, value: searchValue,
+                        kind: item.unit ? item.unit.kind : '' } }
+                : { text: `Geen zoekresultaat binnen ${Math.round(SEARCH_WAIT_MS / 1000)} seconden`,
+                    code: 'noResult', args: { seconds: Math.round(SEARCH_WAIT_MS / 1000) } });
             w.index++; w.attempts = 0; w.searchedAt = 0;
             saveWorklist(w);
             setNativeValue(field, '');
@@ -2875,7 +3130,7 @@
                 if (document.readyState !== 'complete') return;          // let the Costs rows render
                 const existing = matchExistingCosts(costRegionRows(), item, w);
                 if (existing) {
-                    log(`${who}: ${existing} - skipping`);
+                    log(`${who}: ${existing.text} - skipping`);
                     skipWorklistItem(w, item, existing, who);
                     return;
                 }
@@ -2905,10 +3160,11 @@
             const dup = alreadyBooked(item, w);
             if (dup.dup && !w.ignoreExisting) {
                 log(`${who} already carries invoice ${ctx.invoiceNo} - skipping`);
-                skipWorklistItem(w, item, `Factuur ${ctx.invoiceNo} staat al op deze zending`, who);
+                skipWorklistItem(w, item, { text: `Factuur ${ctx.invoiceNo} staat al op deze zending`,
+                    code: 'invoiceOnShipment', args: { invoice: ctx.invoiceNo } }, who);
                 return;
             }
-            if (dup.blind) item.reason = 'Dubbelcontrole niet mogelijk (omschrijving zonder factuurnummer)';
+            if (dup.blind) noteReason(item, { text: 'Dubbelcontrole niet mogelijk (omschrijving zonder factuurnummer)', code: 'blindCheck' });
 
             const items = buildSpecItems(item, {
                 invoiceNo: ctx.invoiceNo, creditorSeq: ctx.creditorSeq, creditorName: ctx.creditorName,
@@ -2942,7 +3198,7 @@
                    : w.items.find(i => i.container === state.container);
         if (done) {
             done.status = ok ? 'done' : 'failed';
-            if (!ok) done.reason = state.failReason || 'Boeken afgebroken — controleer de zending';
+            if (!ok) noteReason(done, { text: state.failReason || 'Boeken afgebroken — controleer de zending', code: state.failReason ? '' : 'aborted' });
         }
         // Block any further booking until we are back on the search page, or the
         // next container's lines would land on the shipment still open here.
@@ -4865,20 +5121,25 @@
 
     /* Everything else known about it, for the review screen and the report:
        ["Kenteken", "shipment 2002004059", "Wegtransport"]. */
-    function transportFacts(t) {
+    /* The same facts in Dutch or English - the end report can be copied in
+       either, and a half-translated line is worse than none. */
+    const UNIT_LABEL_EN = { plate: 'Licence plate' };
+
+    function transportFacts(t, lang) {
+        const en = lang === 'en';
         const name = transportName(t);
         const facts = [];
         if (t.container) facts.push('Container');
         if (t.unit && t.unit.kind !== 'container' && UNIT_KINDS[t.unit.kind]) {
-            const label = UNIT_KINDS[t.unit.kind].label;
+            const label = (en && UNIT_LABEL_EN[t.unit.kind]) || UNIT_KINDS[t.unit.kind].label;
             facts.push(t.unit.value === name ? label : `${label} ${t.unit.value}`);
         }
         if (t.ref) {
-            const kind = isShipmentId(t.ref) ? 'shipment' : 'dossier';
-            facts.push(t.ref === name ? (kind === 'shipment' ? 'shipment id' : 'dossier') : `${kind} ${t.ref}`);
+            const kind = isShipmentId(t.ref) ? 'shipment' : (en ? 'file' : 'dossier');
+            facts.push(t.ref === name ? (isShipmentId(t.ref) ? 'shipment id' : kind) : `${kind} ${t.ref}`);
         }
         const modality = modalityOf(t, t.modality);
-        if (modality) facts.push(MODALITY[modality]);
+        if (modality) facts.push((en ? MODALITY_EN : MODALITY)[modality]);
         return facts;
     }
     const normaliseContainer = m => (m[1] + m[2] + (m[3] || '')).toUpperCase();
