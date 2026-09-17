@@ -43,7 +43,9 @@ came from. Tick per shipment, per invoice, or the lot.
 
 Afterwards the end report groups per invoice, and the dashboard gets **one row
 per invoice** rather than one for the batch — it is searched by invoice number,
-and a row covering three of them would be findable under none.
+and a row covering three of them would be findable under none. Every row carries
+the id of the batch it was read in with, and the dashboard folds them back into
+**one dossier per batch**, with the invoices inside it.
 
 ---
 

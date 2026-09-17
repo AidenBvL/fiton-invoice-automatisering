@@ -91,8 +91,15 @@
     });
   }
 
+  /* The dossier an invoice was read in with sits in the report, not in a
+     column of its own: PostgREST reads it out of the JSON, so a project that
+     never re-ran setup.sql groups its dossiers all the same. Reports from
+     before 9.23 carry no id but do carry when the run started, which the
+     dashboard uses instead. */
   const LIST_COLUMNS = 'id,received_at,booked_at,user,invoice_no,creditor,shipment,container,'
-                     + 'outcome,status,lines_total,lines_booked,amount,avg_ms,message,doc_name';
+                     + 'outcome,status,lines_total,lines_booked,amount,avg_ms,message,doc_name,'
+                     + 'batch_id:detail->>batchId,started_at:detail->>startedAt,batch_size:detail->>batchSize,'
+                     + 'duration_ms:detail->>durationMs,file_name:detail->>fileName,confidence:detail->>confidence';
 
   async function listRuns(cfgIn, filters) {
     const cfg = clean(cfgIn);
@@ -106,6 +113,20 @@
     }
     if (f.status) p.set('status', 'eq.' + f.status);
     if (f.user) p.set('user', 'eq.' + f.user);
+    return (await call(cfg, '/rest/v1/runs?' + p)).json();
+  }
+
+  /* Every invoice of the given dossiers, so a dossier found through one of
+     its invoices is shown whole. Ids and start times each name a dossier. */
+  async function listBatchRuns(cfgIn, keys) {
+    const cfg = clean(cfgIn);
+    const quote = v => '"' + String(v).replace(/["\\]/g, '') + '"';
+    const parts = [];
+    if (keys.batchIds && keys.batchIds.length) parts.push(`detail->>batchId.in.(${keys.batchIds.map(quote).join(',')})`);
+    if (keys.startedAts && keys.startedAts.length) parts.push(`detail->>startedAt.in.(${keys.startedAts.map(quote).join(',')})`);
+    if (!parts.length) return [];
+    const p = new URLSearchParams({ select: LIST_COLUMNS, order: 'received_at.desc', limit: '1000' });
+    p.set('or', '(' + parts.join(',') + ')');
     return (await call(cfg, '/rest/v1/runs?' + p)).json();
   }
 
@@ -170,5 +191,5 @@
     return results;
   }
 
-  root.FitonSupabase = { BUCKET, clean, insertRun, listRuns, getRun, stats, latestVersion, downloadDocument, test };
+  root.FitonSupabase = { BUCKET, clean, insertRun, listRuns, listBatchRuns, getRun, stats, latestVersion, downloadDocument, test };
 })(typeof self !== 'undefined' ? self : this);

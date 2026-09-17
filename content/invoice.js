@@ -3843,6 +3843,11 @@
                     startedAt: w.startedAt || null, durationMs: w.startedAt ? Date.now() - w.startedAt : null,
                     // Only meaningful when more than one invoice went in at once.
                     batchInvoices: groups.length > 1 ? groups.length : null,
+                    /* The dossier this invoice was read in with: its id and how
+                       many invoices it holds, so the dashboard can show the
+                       dossier complete even while its last reports are still
+                       on their way. */
+                    batchId: w.batchId || null, batchSize: groups.length,
                     mode: 'cost',
                     version: chrome.runtime.getManifest().version,
                     machine: navigator.userAgent.replace(/^.*\((.*?)\).*$/, '$1').slice(0, 60)
@@ -6193,6 +6198,9 @@
                 descMode: opts.descMode, combine: opts.combine,
                 searchUrl: location.href,
                 user: fitonUser(), startedAt: Date.now(),
+                /* One id for everything read in together, so the dashboard can
+                   fold the 34 invoices of one afternoon into one dossier. */
+                batchId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
                 ignoreExisting: !!opts.ignoreExisting,
                 /* What was read per document, so the end report can go out one
                    row per invoice however many went in at once. */

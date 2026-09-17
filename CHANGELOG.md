@@ -1,5 +1,30 @@
 # Wat er veranderd is
 
+## 9.23.0
+
+**Het dashboard groepeert per inlezing.** Wie 34 facturen in één keer inlas,
+kreeg 34 losse regels in het dashboard, tussen de regels van collega's door. Elke
+inlezing is nu één dossier: één regel met wanneer, door wie, hoeveel facturen,
+een balkje met geboekt / deels / mislukt, het totaalbedrag en het resultaat. Klik
+erop en de facturen klappen eronder uit; klik op een factuur en rechts staat wat
+er geboekt is, per zending, met de PDF erbij zoals eerst.
+
+Daarvoor krijgt elke inlezing in de extensie een eigen id, die met elk
+factuurrapport meegaat. Rapporten van vóór deze versie hebben dat id niet, maar
+dragen wél het starttijdstip van de run mee — daarop worden ze alsnog tot
+dossiers gevouwen, dus ook wat er al staat wordt overzichtelijk. Er hoeft niets
+aan Supabase te veranderen: het id zit in het detail-veld dat er al was, en het
+dashboard leest het daaruit.
+
+**Het dashboard zelf is opnieuw ingedeeld.** Rustiger: dossiers links, het
+detail rechts, en per dossier een overzicht met wat aandacht nodig heeft — de
+facturen die niet of maar deels geboekt zijn, met de reden, om direct op door te
+klikken. De filters *Volledig geboekt / Deels / Niet gelukt* werken nu op het
+dossier. Zoeken vindt een factuur, crediteur, zending of container en opent het
+dossier waar die in zit, met de treffers gemarkeerd, zodat je ziet met welke
+inlezing hij meekwam. Een dossier waarvan nog niet alle rapporten binnen zijn —
+een pc die het dashboard even niet kon bereiken — zegt hoeveel er nog komen.
+
 ## 9.22.1
 
 **Cosco-facturen werden niet gelezen.** Een Cosco-factuur gaf *Geen kostenregels

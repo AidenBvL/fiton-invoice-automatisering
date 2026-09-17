@@ -12,7 +12,7 @@
 -->
 <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
   <app appid="EXTENSION_ID_HERE">
-    <updatecheck codebase="https://REPLACE-ME.example.com/fiton/fiton-invoice-9.22.1.crx"
-                 version="9.22.1" />
+    <updatecheck codebase="https://REPLACE-ME.example.com/fiton/fiton-invoice-9.23.0.crx"
+                 version="9.23.0" />
   </app>
 </gupdate>
