@@ -1472,7 +1472,9 @@
             color: var(--fip-text); line-height: 1.45;
         }
         .fip-textarea:focus { outline: none; border-color: var(--fip-accent); box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
-        .fip-lines { padding: 4px 6px; }
+        /* takes what is left of the row, so a long description is cut short
+           with an ellipsis instead of pushing the total off the card */
+        .fip-lines { padding: 4px 6px; width: 100%; max-width: 0; min-width: 240px; }
         .fip-linerow { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; padding: 1px 0; }
         .fip-linedesc { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .fip-lineledger {
@@ -1481,6 +1483,27 @@
         }
         .fip-lineledger.is-guess { color: var(--fip-warn-text); background: var(--fip-warn-bg); }
         .fip-lineamt { flex: none; font-variant-numeric: tabular-nums; color: var(--fip-muted); min-width: 62px; text-align: right; }
+        .fip-linebtn {
+            flex: none; border: none; background: none; cursor: pointer; line-height: 1;
+            font-size: 12px; color: var(--fip-muted); padding: 0 3px;
+        }
+        .fip-linebtn:hover { color: var(--fip-accent); }
+        .fip-linebtn.is-ok { color: #166534; font-weight: 700; font-size: 13px; }
+        .fip-linebtn.is-del:hover { color: var(--fip-danger); }
+        /* editing: the description on a line of its own, the rest below it -
+           the column is too narrow for all of it side by side */
+        .fip-linerow.is-editing { align-items: center; flex-wrap: wrap; gap: 4px 5px; padding: 3px 0 5px; }
+        .fip-linerow.is-editing .fip-lineinput[data-edit="desc"] { flex: 1 1 100%; }
+        .fip-lineinput, .fip-lineselect {
+            font: inherit; font-size: 11.5px; padding: 3px 6px; min-width: 0;
+            border: 1px solid var(--fip-border); border-radius: 5px; background: #fff; color: inherit;
+        }
+        .fip-lineinput:focus, .fip-lineselect:focus { outline: none; border-color: var(--fip-accent); }
+        .fip-lineinput { flex: 1; }
+        .fip-lineselect { flex: 1 1 120px; }
+        .fip-lineinput-amt { flex: none; width: 80px; text-align: right; }
+        .fip-addline { border: none; background: none; cursor: pointer; font-size: 11px; color: var(--fip-accent); padding: 3px 0 0; }
+        .fip-addline:hover { text-decoration: underline; }
         .fip-spec-row { cursor: pointer; }
         .fip-spec-row:hover td { background: var(--fip-surface); }
         .fip-spec-row.is-chosen td { background: var(--fip-accent-soft); }
@@ -4508,12 +4531,19 @@
     ];
 
     function ledgerForSpecLine(desc, line) {
+        // a ledger picked by hand in the preview wins over every rule
+        if (line && line.ledgerId) {
+            const chosen = Object.values(LEDGER).find(l => l.id === String(line.ledgerId));
+            if (chosen) return chosen;
+        }
         const hit = SPEC_LEDGER_RULES.find(r => r.re.test(desc));
         if (hit) return hit.led();
         if (line && line.isTransportRow) return LEDGER.trucking;   // the row with the container
         return LEDGER.misc;
     }
     const ledgerIsGuess = desc => !SPEC_LEDGER_RULES.some(r => r.re.test(desc));
+    // a line whose ledger is neither picked by hand nor matched by a rule
+    const guessedLine = l => !l.ledgerId && !l.isTransportRow && ledgerIsGuess(l.desc);
 
     /* =========================================================================
        STRUCTURAL INVOICE READING
@@ -4802,6 +4832,15 @@
 
     function structuredParse(allRows) {
         const rows = mergeOrphanAmountRows(allRows);
+        /* The charge named once in the header, for a row that names none of
+           its own: ONE writes "Charge: DMIF(DEMURRAGE INBOUND LADEN CONTAINER)"
+           above a table whose row holds only the container, its dates and the
+           day count. */
+        const docCharge = (() => {
+            const m = /\b(?:charge(?:\s*(?:type|name|description))?|kostensoort)\s*:\s*([^\n]{3,80}?)\s*$/im
+                .exec(allRows.map(r => r.raw).join('\n'));
+            return m && /[A-Za-z]{3}/.test(m[1]) ? m[1].trim() : '';
+        })();
         const mainCurrency = dominantCurrency(rows);
         const col = findMoneyColumn(rows);
         const tolerance = 60;
@@ -4825,7 +4864,8 @@
            description has no real word in it is the heading used instead. */
         const MONTH_DATE = /^\d{1,2}[-/. ]?(jan|feb|mar|apr|may|mei|jun|jul|aug|sep|oct|okt|nov|dec)[a-z]*[-/. ]?\d{0,4}$/i;
         const TABLE_WORD = /^(calendar|kalender|type|tax|btw|vat|rate|from|to|date)$/i;
-        const isWeakDesc = d => !String(d).split(/\s+/).some(t =>
+        // dates are not words: "13 Sep 2026 15 Sep 2026" names no charge
+        const isWeakDesc = d => !String(d).replace(new RegExp(DATE_IN_TEXT.source, 'gi'), ' ').split(/\s+/).some(t =>
             /[a-z]{3,}/i.test(t) && !MONTH_DATE.test(t) && !UNIT_WORD.test(t)
             && !TABLE_WORD.test(t) && !new RegExp('^' + CURRENCY_RE.source + '$', 'i').test(t));
         const headingOf = row => {
@@ -4956,7 +4996,7 @@
                arithmetic: 230 + 230 + 230 has no line that is the sum of the
                others. So a row whose description starts with a total word is
                never booked; its amount is kept to check the charges against. */
-            if (TOTAL_DESC.test(desc)) { labelledTotals.push({ value: round2(amount), sheet: row.sheet }); return; }
+            if (isTotalDesc(desc)) { labelledTotals.push({ value: round2(amount), sheet: row.sheet }); return; }
 
             /* The same total, with its label in a row of its own: the amount is
                that label's, not of whatever text happened to land beside it. */
@@ -4976,6 +5016,7 @@
             }
 
             if (current && current.heading && isWeakDesc(desc)) desc = current.heading;
+            else if (docCharge && isWeakDesc(desc)) desc = docCharge;
 
             /* Some invoices print what the charge IS as a heading above the
                block and leave the row itself to the container and the dates:
@@ -5066,7 +5107,13 @@
        paid to customs on our behalf ("Import VAT", "BTW bij invoer") is money we
        owe them and is booked like any disbursement, at 0% - so it is not here. */
     const VAT_DESC = /^(?:btw|b\.t\.w\.?|vat|tva|mwst|ust|iva|moms|omzetbelasting|belasting|sales tax)\b(?!.*\b(?:invoer|import|douane|customs)\b)/i;
-    const TOTAL_DESC = /^(?:sub-?\s?)?(?:totaal|total|totale|summe|gesamt)\b|^(?:te betalen|amount due|balance due|grand total|net amount|invoice total|nettobetrag|montant total)\b/i;
+    const TOTAL_DESC = /^(?:sub-?\s?)?(?:totaal|total|totale|summe|gesamt|sum)\b|^(?:te betalen|amount due|balance due|grand total|net amount|invoice total|nettobetrag|montant total)\b/i;
+    /* A total label at the END of what was read as a description. ONE prints
+       "Ex.Rate: 1.00000   Sub Total:   190.00" on one line, and the exchange
+       rate in front hid the word that says it is a total - so a 190,00 invoice
+       booked 570,00. "Lump sum" is a charge, not a sum. */
+    const TOTAL_TAIL = /\b(?:sub-?\s?total|total|totaal|(?<!lump\s?)sum|summe|net amount|amount due)\s*:?\s*$/i;
+    const isTotalDesc = d => TOTAL_DESC.test(d) || TOTAL_TAIL.test(d);
 
     /* A row whose amount equals the sum of the rows above it is a total, not a
        charge. Peel those off - that is how the totals are found without relying
@@ -5604,7 +5651,7 @@
                 items.push({
                     ledgerId: led.id, ledgerName: led.name,
                     desc: describe(l.desc), qty: l.qty, price: l.unitPrice,
-                    group: 'Specificatie', guessedLedger: ledgerIsGuess(l.desc),
+                    group: 'Specificatie', guessedLedger: guessedLine(l),
                     creditorSeq: o.creditorSeq || null, creditorName: o.creditorName || ''
                 });
             });
@@ -5712,6 +5759,7 @@
                 <div class="fip-card" id="spec-result-card" style="display:none;">
                     <div class="fip-card-title">Gevonden kosten <span class="fip-count" id="spec-count">0</span></div>
                     <div class="fip-scroll"><table class="fip-table" id="spec-table"></table></div>
+                    <div class="fip-hint">Klopt een regel niet? Klik ✎ om de omschrijving, het grootboek of het bedrag aan te passen, of verwijder de regel. Het totaal wordt daarna opnieuw tegen de factuur gecontroleerd.</div>
                 </div>
 
                 <div class="fip-card">
@@ -5897,10 +5945,11 @@
             if (d.error) return `<span class="fip-badge is-bad">niet gelezen</span>`;
             const n = d.parsed.transports.length;
             const guessed = d.parsed.transports.reduce((m, t) =>
-                m + t.lines.filter(l => ledgerIsGuess(l.desc) && !l.isTransportRow).length, 0);
+                m + t.lines.filter(guessedLine).length, 0);
             const bits = [`${n} zending${n === 1 ? '' : 'en'}`, money(docTotal(d))];
             if (d.parsed.isCredit) bits.push('creditnota');
             if (d.parsed.skippedVat) bits.push(`btw ${money(d.parsed.skippedVat)} niet geboekt`);
+            if (d.parsed.edited) bits.push('handmatig aangepast');
             if (guessed) bits.push(`${guessed} regel(s) zonder zeker grootboek`);
             return esc(bits.join(' · ')) + (d.parsed.confidence === 'exact'
                 ? ' <span class="fip-badge is-ok">totaal klopt</span>'
@@ -5942,6 +5991,123 @@
             });
         }
 
+        /* ---------- correcting a line ----------
+           What the parser read is not always what should be booked: a subtotal
+           read as a charge, a ledger guessed wrong, a description that says
+           nothing. The two ways out used to be booking the wrong thing or
+           booking nothing; a line can now be corrected here first. */
+        let editing = null;                              // 'docId|i|j' of the line being edited
+        const lineKey = (d, i, j) => `${d.id}|${i}|${j}`;
+        const lineAt = key => {
+            const [docId, i, j] = String(key).split('|');
+            const d = docs.find(x => x.id === docId);
+            const tr = d && d.parsed.transports[parseInt(i, 10)];
+            return tr ? { d, i: parseInt(i, 10), j: parseInt(j, 10), tr, line: tr.lines[parseInt(j, 10)] } : null;
+        };
+        const LEDGER_CHOICES = [...new Map(Object.values(LEDGER).map(l => [l.id, l])).values()]
+            .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+        const ledgerOptions = chosen => LEDGER_CHOICES.map(l =>
+            `<option value="${l.id}" ${l.id === chosen ? 'selected' : ''}>${esc(l.id)} · ${esc(l.name)}</option>`).join('');
+
+        function lineRow(d, i, j, l) {
+            const key = lineKey(d, i, j);
+            const led = ledgerForSpecLine(l.desc, l);
+            if (editing === key) {
+                return `<div class="fip-linerow is-editing" data-linekey="${key}">
+                    <input type="text" class="fip-lineinput" data-edit="desc" value="${esc(l.desc)}" placeholder="Omschrijving">
+                    <select class="fip-lineselect" data-edit="ledger" title="Grootboek">${ledgerOptions(led.id)}</select>
+                    <input type="text" class="fip-lineinput fip-lineinput-amt" data-edit="amount" value="${esc(Number(l.amount).toFixed(2).replace('.', ','))}" title="Bedrag">
+                    <button type="button" class="fip-linebtn is-ok" data-linesave="${key}" title="Opslaan (Enter)">✓</button>
+                    <button type="button" class="fip-linebtn is-del" data-linedel="${key}" title="Regel verwijderen">🗑</button>
+                </div>`;
+            }
+            return `<div class="fip-linerow" data-linekey="${key}">
+                <span class="fip-linedesc" title="${esc(l.desc)}">${esc(l.desc)}${l.edited ? ' <span class="fip-tag">aangepast</span>' : ''}</span>
+                <span class="fip-lineledger${guessedLine(l) ? ' is-guess' : ''}" title="${esc(led.name)}">${led.id}</span>
+                <span class="fip-lineamt">${money(l.amount)}</span>
+                <button type="button" class="fip-linebtn" data-lineedit="${key}" title="Regel aanpassen">✎</button>
+            </div>`;
+        }
+
+        /* Totals follow the lines, and the check against the invoice is done
+           again: a corrected invoice that now adds up is verified, one that
+           does not still asks for "Toch boeken". */
+        function recount(d) {
+            const p = d.parsed;
+            p.transports.forEach(tr => { tr.total = round2(tr.lines.reduce((a, l) => a + (Number(l.amount) || 0), 0)); });
+            p.calcTotal = round2(p.transports.reduce((a, tr) => a + tr.total, 0));
+            p.edited = true;
+            if (p.statedTotal != null) {
+                const ok = Math.abs(p.calcTotal - p.statedTotal) < 0.02;
+                p.confidence = ok ? 'exact' : 'mismatch';
+                p.note = ok ? '' : `Handmatig aangepast: de regels komen op ${money(p.calcTotal)}, de factuur noemt ${money(p.statedTotal)}.`;
+            } else {
+                p.confidence = 'unverified';
+                p.note = 'Handmatig aangepast; de factuur noemt geen totaal om tegen te controleren.';
+            }
+        }
+
+        function startEdit(key) {
+            editing = key;
+            renderResults();
+            const first = overlay.querySelector('.fip-linerow.is-editing input');
+            if (first) { first.focus(); first.select(); }
+        }
+
+        function saveLine(key) {
+            const at = lineAt(key);
+            const row = overlay.querySelector(`.fip-linerow.is-editing[data-linekey="${key}"]`);
+            if (!at || !at.line || !row) { editing = null; renderResults(); return; }
+            const value = field => (row.querySelector(`[data-edit="${field}"]`) || {}).value || '';
+            const amount = parseAmount(value('amount'));
+            if (isNaN(amount)) { fipTell('Het bedrag is niet leesbaar. Schrijf het als 190,00.'); return; }
+            const l = at.line;
+            const desc = value('desc').trim();
+            if (desc) l.desc = desc;
+            l.ledgerId = value('ledger') || '';
+            if (Math.abs(amount - Number(l.amount)) > 0.001) {
+                l.amount = round2(amount); l.qty = 1; l.unitPrice = round2(amount);
+            }
+            l.edited = true;
+            delete l.added;
+            editing = null;
+            recount(at.d);
+            renderDocs();
+            renderResults();
+            renderStatus();
+        }
+
+        function cancelEdit() {
+            const at = editing && lineAt(editing);
+            // a line added and then abandoned goes away again
+            if (at && at.line && at.line.added) at.tr.lines.splice(at.j, 1);
+            editing = null;
+            renderResults();
+        }
+
+        function deleteLine(key) {
+            const at = lineAt(key);
+            if (!at || !at.line) return;
+            at.tr.lines.splice(at.j, 1);
+            /* Nothing left on a transport: it is dropped, or the run would write
+               an empty line of 0,00 onto a real shipment. */
+            if (!at.tr.lines.length) at.d.parsed.transports.splice(at.i, 1);
+            editing = null;
+            recount(at.d);
+            renderDocs();
+            renderResults();
+            renderStatus();
+        }
+
+        function addLine(docId, i) {
+            const d = docs.find(x => x.id === docId);
+            const tr = d && d.parsed.transports[i];
+            if (!tr) return;
+            if (editing) cancelEdit();
+            tr.lines.push({ desc: '', qty: 1, unitPrice: 0, amount: 0, row: '', added: true });
+            startEdit(lineKey(d, i, tr.lines.length - 1));
+        }
+
         function renderResults() {
             const pairs = docTransports();
             const t = $('spec-table');
@@ -5974,15 +6140,8 @@
                             ${transportName(tr) ? '' : '<div class="fip-ledger">geen container, eenheid of referentie herkend — kan niet worden opgezocht</div>'}
                         </td>
                         <td class="fip-lines">
-                            ${tr.lines.map(l => {
-                                const led = ledgerForSpecLine(l.desc, l);
-                                return `<div class="fip-linerow">
-                                    <span class="fip-linedesc">${esc(l.desc)}</span>
-                                    <span class="fip-lineledger${ledgerIsGuess(l.desc) && !l.isTransportRow ? ' is-guess' : ''}"
-                                          title="${esc(led.name)}">${led.id}</span>
-                                    <span class="fip-lineamt">${money(l.amount)}</span>
-                                </div>`;
-                            }).join('')}
+                            ${tr.lines.map((l, j) => lineRow(d, i, j, l)).join('')}
+                            <button type="button" class="fip-addline" data-addline="${d.id}|${i}">+ regel toevoegen</button>
                         </td>
                         <td class="num">${money(tr.total)}</td>
                     </tr>`).join('');
@@ -6106,6 +6265,17 @@
                 renderResults();
                 return;
             }
+            const attr = name => e.target.getAttribute && e.target.getAttribute(name);
+            if (attr('data-lineedit')) { startEdit(attr('data-lineedit')); return; }
+            if (attr('data-linesave')) { saveLine(attr('data-linesave')); return; }
+            if (attr('data-linedel')) { deleteLine(attr('data-linedel')); return; }
+            if (attr('data-addline')) {
+                const [docId, i] = attr('data-addline').split('|');
+                addLine(docId, parseInt(i, 10));
+                return;
+            }
+            // typing in a line is not choosing or unchoosing its transport
+            if (e.target.closest('.fip-linerow.is-editing')) return;
             const docCheck = e.target.getAttribute && e.target.getAttribute('data-doccheck');
             if (docCheck) {
                 const d = docs.find(x => x.id === docCheck);
@@ -6122,6 +6292,13 @@
             tr.pick = e.target.classList && e.target.classList.contains('spec-pick')
                 ? e.target.checked : !tr.pick;
             renderResults();
+        });
+
+        overlay.addEventListener('keydown', e => {
+            const row = e.target.closest && e.target.closest('.fip-linerow.is-editing');
+            if (!row) return;
+            if (e.key === 'Enter') { e.preventDefault(); saveLine(row.getAttribute('data-linekey')); }
+            else if (e.key === 'Escape') { e.stopPropagation(); cancelEdit(); }
         });
 
         $('spec-copy').addEventListener('click', () => {
@@ -7672,7 +7849,7 @@
                         prijs: l.unitPrice,
                         bedrag: l.amount,
                         grootboek: ledgerForSpecLine(l.desc, l).id,
-                        geraden: (ledgerIsGuess(l.desc) && !l.isTransportRow) ? 'ja' : ''
+                        geraden: guessedLine(l) ? 'ja' : ''
                     }))
                 });
             });
