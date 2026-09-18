@@ -1,5 +1,27 @@
 # Wat er veranderd is
 
+## 9.24.0
+
+**Kostenregels zijn aan te passen voor het boeken.** Wat de parser leest is niet
+altijd wat geboekt moet worden, en tot nu toe waren er dan twee smaken: het
+verkeerde boeken, of helemaal niets. In *Gevonden kosten* staat nu achter elke
+regel een ✎: omschrijving, grootboek en bedrag zijn te wijzigen, een regel is te
+verwijderen en er is er een toe te voegen. Het totaal wordt daarna opnieuw tegen
+de factuur gecontroleerd — komt het uit, dan is de factuur geverifieerd; zo niet,
+dan blijft *Toch boeken* nodig. Een gekozen grootboek gaat vóór elke regel en
+komt zo ook in het eindrapport en het dashboard terecht.
+
+**Een ONE-demurragefactuur van € 190 kwam binnen als € 570.** De regel SUM en de
+regel *Ex.Rate: 1.00000 Sub Total* werden allebei als kosten gelezen. SUM telt nu
+als totaal, en een omschrijving die *eindigt* op een totaalwoord ook — de
+wisselkoers ervoor verborg het woord. *Lump sum* blijft een kostenregel.
+
+De regel zelf heette *R5 13 Sep 2026 15 Sep 2026 13 Sep 2026 14 Sep 2026 2 1 - 5
+190.000* en viel op 4930 Trucking. Data zijn geen woorden, dus zo'n omschrijving
+telt nu als leeg, en dan wordt de kostensoort genomen die de factuur bovenaan
+noemt: *Charge: DMIF(DEMURRAGE INBOUND LADEN CONTAINER)*. Dat boekt op 4934
+Demurrage, en de factuur leest als één regel van € 190,00, gelijk aan het totaal.
+
 ## 9.23.0
 
 **Het dashboard groepeert per inlezing.** Wie 34 facturen in één keer inlas,
