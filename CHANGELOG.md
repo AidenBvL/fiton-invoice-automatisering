@@ -1,5 +1,34 @@
 # Wat er veranderd is
 
+## 9.25.0
+
+**Na het boeken wordt de zending nagelezen.** Een Maersk-factuur van drie regels
+(€ 463,00) kwam in het rapport als volledig geboekt, terwijl er één regel op de
+zending stond: FitOn weigerde de eerste twee omdat het btw-bedrag leeg was, en de
+run merkte dat niet. Daar zaten twee gaten:
+
+- De opslagcontrole leest "row(s) 1 - 3 of 3" onder het formulier. Op een
+  zending zonder kosten staat daar "no data found", en dat las als *onleesbaar*
+  — dus geen controle, en de volgende regel werd over de geweigerde heen getypt.
+  Dat is nu nul regels, en de eerste regel wordt net zo gecontroleerd als de rest.
+- Het btw-bedrag hoort de pagina zelf uit te rekenen. Blijft het leeg bij de
+  0%-code, dan wordt het nu op 0 gezet voordat er op Create wordt geklikt.
+
+En het sluitstuk: na het boeken wordt de zending opnieuw opgezocht en worden de
+kostenregels nagelezen, regel voor regel, tegen wat erin ging. Rijen die er vóór
+de run al stonden tellen niet mee. Staat alles erop, dan is de zending geboekt;
+zo niet, dan staat ze als *onvolledig* in het rapport en het dashboard, met
+precies de regels die ontbreken. Het kost per zending één extra zoekopdracht; het
+vinkje *Na het boeken de zending opnieuw openen en controleren* staat standaard
+aan en is per run uit te zetten.
+
+**Een half geboekte factuur is opnieuw in te slepen.** Tot nu toe was een zending
+waar het factuurnummer al op stond "al geboekt", ook als er één regel van de drie
+stond. Nu wordt per regel gekeken welke er al is — op bedrag, op de rijen met dat
+factuurnummer, en twee regels van € 8,50 hebben twee rijen nodig — en alleen wat
+ontbreekt wordt geboekt. Staat alles er al, dan wordt de zending overgeslagen
+zoals eerst.
+
 ## 9.24.0
 
 **Kostenregels zijn aan te passen voor het boeken.** Wat de parser leest is niet

@@ -998,6 +998,14 @@
         const m = text.match(/row\(s\)\s*\d+\s*[-–]\s*\d+\s*of\s*(\d+)/i);
         if (m) return parseInt(m[1], 10);
         if (/\b1\s*row\(s\)\b/i.test(text)) return 1;
+        /* A shipment without a single cost line yet shows "no data found" where
+           the count would be. That is zero, not unreadable. Read as unreadable,
+           the very first line of a fresh shipment was never checked for having
+           saved, and a form FitOn refused (VAT amount empty) was typed over by
+           the next line - the run then reported three lines booked with one on
+           the shipment. Only on the entry form, where the list is the only
+           thing that shows those words. */
+        if (detectMode() && /\bno data found\b|\bgeen gegevens gevonden\b/i.test(text)) return 0;
         return null;
     }
 
@@ -2603,9 +2611,11 @@
     const MODALITY_EN = { sea: 'Ocean freight', road: 'Road transport', rail: 'Rail transport', air: 'Air freight' };
     const STATUS_WORDS = {
         nl: { done: 'Geboekt', duplicate: 'Overgeslagen', notfound: 'Niet gevonden',
-              failed: 'Mislukt', pending: 'Niet verwerkt', booking: 'Onbekend' },
+              failed: 'Mislukt', pending: 'Niet verwerkt', booking: 'Onbekend',
+              incomplete: 'Onvolledig', verify: 'Niet gecontroleerd' },
         en: { done: 'Booked', duplicate: 'Skipped', notfound: 'Not found',
-              failed: 'Failed', pending: 'Not processed', booking: 'Unknown' }
+              failed: 'Failed', pending: 'Not processed', booking: 'Unknown',
+              incomplete: 'Incomplete', verify: 'Not verified' }
     };
 
     /* The English report writes its own sentence from the code rather than
@@ -2633,7 +2643,11 @@
              : 'this reference'),
         noResult: a => `No search result within ${a.seconds || 12} seconds`,
         blindCheck: () => 'Duplicate check not possible (description carries no invoice number)',
-        aborted: () => 'Booking stopped — check the shipment'
+        aborted: () => 'Booking stopped — check the shipment',
+        linesAlreadyThere: a => `${a.present} of ${a.total} lines were on the shipment already; only the missing ${a.missing} booked`,
+        linesMissing: a => `After booking, ${a.found} of ${a.total} lines are on the shipment. Missing: `
+            + (a.missing || []).map(m => `${m.desc} (${money(m.amount)})`).join(', '),
+        verifyImpossible: () => 'Check after booking not possible: the shipment was not found again'
     };
 
     const reasonIn = (item, lang) => {
@@ -2774,7 +2788,9 @@
             notfound:  { text: 'Niet gevonden',  cls: 'bad' },
             failed:    { text: 'Mislukt',        cls: 'bad' },
             pending:   { text: 'Niet verwerkt',  cls: 'warn' },
-            booking:   { text: 'Onbekend',       cls: 'warn' }
+            booking:   { text: 'Onbekend',       cls: 'warn' },
+            incomplete:{ text: 'Onvolledig',     cls: 'bad' },
+            verify:    { text: 'Niet gecontroleerd', cls: 'warn' }
         };
         /* What went through, what was left alone and what did not work, each
            with its money: a count on its own does not say whether the evening
@@ -2935,16 +2951,34 @@
 
         const ctx = itemInvoice(w, item);
         const invoice = ctx.invoiceNo;
+        const lines = (item.lines || []).filter(l => l.amount);
+        const total = round2(item.total || 0);
         if (invoice.length >= 4) {
-            const hit = rows.find(r => r.text.includes(invoice));
-            if (hit) {
+            const hits = rows.filter(r => r.text.includes(invoice));
+            if (hits.length) {
+                /* Which of this invoice's lines are on those rows? A run that
+                   stopped after one line of three used to leave the shipment
+                   untouchable: the invoice number was there, so the whole
+                   invoice was "already booked". Now the lines that are there
+                   are left alone and the rest is booked. Amounts are taken off
+                   a pool, so two lines of 8,50 need two rows of 8,50. */
+                const pool = hits.flatMap(r => r.amounts.slice());
+                const take = v => {
+                    const k = pool.findIndex(a => Math.abs(a - v) < 0.005);
+                    if (k < 0) return false;
+                    pool.splice(k, 1);
+                    return true;
+                };
+                const missing = w.combine ? (take(total) ? [] : lines) : lines.filter(l => !take(l.amount));
+                if (!w.combine && missing.length && missing.length < lines.length) {
+                    return { partial: { missing, present: lines.length - missing.length, total: lines.length } };
+                }
+                const hit = hits[0];
                 return { text: `Factuur ${invoice} staat al op deze zending: ${quote(hit)}`,
                          code: 'invoiceOnShipment', args: { invoice, quote: hit.text.slice(0, 90) } };
             }
         }
 
-        const lines = (item.lines || []).filter(l => l.amount);
-        const total = round2(item.total || 0);
         const creditor = creditorKey(ctx.creditorName);
         const fromCreditor = r => !!creditor && creditorKey(r.text).includes(creditor);
         const has = (r, v) => r.amounts.some(a => Math.abs(a - v) < 0.005);
@@ -2997,6 +3031,48 @@
         setTimeout(() => { if (w.searchUrl) location.href = w.searchUrl; else runWorklist(); }, 800);
     }
 
+    /* The check after booking: the shipment's cost rows, read back against
+       what went in. Rows that were there before the run do not count, so a
+       line of the same amount from another invoice can never stand in for
+       ours. A line is found when a new row carries its amount and - unless
+       descriptions carry no invoice number - the invoice number. Whatever the
+       run itself reported, this is what decides. */
+    function finishVerify(w, item, rowTexts) {
+        const booked = item.bookedItems || [];
+        const invoice = itemInvoice(w, item).invoiceNo;
+        const clean = t => String(t).replace(/\s+/g, ' ').trim();
+        if (rowTexts === null) {
+            item.status = item.runOk ? 'done' : 'failed';
+            if (item.runOk) noteReason(item, { text: 'Controle na het boeken niet mogelijk: de zending werd niet opnieuw gevonden', code: 'verifyImpossible' });
+        } else {
+            const pool = rowTexts.map(clean);
+            (item.rowsBeforeBooking || []).map(clean).forEach(t => { const k = pool.indexOf(t); if (k >= 0) pool.splice(k, 1); });
+            const fresh = pool.map(text => ({ text, amounts: moneyIn(text) }));
+            const found = [], missing = [];
+            booked.forEach(b => {
+                const k = fresh.findIndex(r => r.amounts.some(a => Math.abs(a - b.amount) < 0.005)
+                    && (w.descMode === 'name' || !invoice || r.text.includes(invoice)));
+                if (k >= 0) { fresh.splice(k, 1); found.push(b); } else missing.push(b);
+            });
+            item.verified = { found: found.length, total: booked.length,
+                              missing: missing.map(m => ({ desc: m.desc, amount: m.amount })) };
+            if (!missing.length) {
+                item.status = 'done';
+                log(`${transportName(item) || '?'}: all ${found.length} lines are on the shipment`);
+            } else {
+                item.status = 'incomplete';
+                const list = missing.map(m => `${m.desc} (${money(m.amount)})`).join(', ');
+                noteReason(item, { text: `Na het boeken staan ${found.length} van de ${booked.length} regels op de zending. Ontbreekt: ${list}`,
+                    code: 'linesMissing', args: { found: found.length, total: booked.length, missing: item.verified.missing } });
+                log(`${transportName(item) || '?'}: ${missing.length} line(s) not on the shipment: ${list}`);
+            }
+        }
+        w.awaitSearch = true;
+        saveWorklist(w);
+        setSubStatus(`${transportName(item) || '?'} · gecontroleerd`);
+        setTimeout(() => { if (w.searchUrl) location.href = w.searchUrl; else runWorklist(); }, 800);
+    }
+
     async function runWorklist() {
         const w = loadWorklist();
         if (!w || !w.running) return;
@@ -3009,7 +3085,9 @@
             saveWorklist(w);
         }
 
-        const item = w.items[w.index];
+        // A shipment just booked is looked up once more and checked, before the next one.
+        const verifying = w.verify ? w.items.find(i => i.status === 'verify') : null;
+        const item = verifying || w.items[w.index];
         if (!item) {
             const booked = w.items.filter(i => i.status === 'done').length;
             const clean = booked === w.items.length;
@@ -3029,8 +3107,8 @@
         }
 
         const pct = (w.index / w.items.length) * 100;
-        setStatus(`Container ${w.index + 1} van ${w.items.length}`, 'running', pct);
-        setSubStatus(`${transportName(item) || '?'} · ${money(item.total)}`);
+        setStatus(verifying ? `Controle van zending ${w.index} van ${w.items.length}` : `Container ${w.index + 1} van ${w.items.length}`, 'running', pct);
+        setSubStatus(`${transportName(item) || '?'} · ${money(item.total)}${verifying ? ' · controleren' : ''}`);
 
         /* STEP 1 - Search: look the shipment up. Forwarding > Search is used on
            the container number or the B/L, so those come first; the rest is what
@@ -3071,6 +3149,7 @@
             const field = fields[searchBy];
             if (!field) {
                 if (searchBy !== 'shipment' && searchBy !== 'unit') return;
+                if (verifying) { finishVerify(w, item, null); return; }
                 item.status = 'notfound';
                 noteReason(item, searchBy === 'unit'
                     ? { text: `Geen zoekveld voor ${UNIT_KINDS[item.unit.kind].label} op de zoekpagina — zoek ${item.unit.value} handmatig`,
@@ -3124,6 +3203,12 @@
                 return;
             }
 
+            if (verifying) {
+                log(`No shipment found for ${who} while verifying - keeping the run's own result`);
+                setNativeValue(field, '');
+                finishVerify(w, item, null);
+                return;
+            }
             log(`No shipment found for ${who} after ${Math.round(elapsed / 1000)}s - skipping`);
             item.status = 'notfound';
             noteReason(item, noData
@@ -3148,15 +3233,39 @@
                 const no = shipmentNoOnPage();
                 if (no) { item.shipmentNo = no; saveWorklist(w); log(`${who} is shipment ${no}`); }
             }
+            if (verifying) {
+                if (findRegionCreateButton('cost')) {
+                    if (document.readyState !== 'complete') return;          // let the Costs rows render
+                    setSubStatus(`${who} · kostenregels nalezen…`);
+                    finishVerify(w, item, costRegionRows());
+                    return;
+                }
+                const financials = findFinancialsButton();
+                if (financials) { financials.click(); return; }
+                return;
+            }
             // Before anything is created: are these costs on the shipment already?
             if (!w.ignoreExisting && findRegionCreateButton('cost')) {
                 if (document.readyState !== 'complete') return;          // let the Costs rows render
                 const existing = matchExistingCosts(costRegionRows(), item, w);
-                if (existing) {
+                if (existing && existing.partial) {
+                    const { missing, present, total } = existing.partial;
+                    log(`${who}: ${present} of ${total} lines already on the shipment - booking the other ${missing.length}`);
+                    item.allLines = item.allLines || item.lines.slice();
+                    item.lines = missing;
+                    item.total = round2(missing.reduce((a, l) => a + (Number(l.amount) || 0), 0));
+                    noteReason(item, { text: `${present} van de ${total} regels stond al op de zending; alleen de ontbrekende ${missing.length} geboekt`,
+                        code: 'linesAlreadyThere', args: { present, total, missing: missing.length } });
+                } else if (existing) {
                     log(`${who}: ${existing.text} - skipping`);
                     skipWorklistItem(w, item, existing, who);
                     return;
                 }
+                /* What is on the shipment now, so the check after booking can
+                   tell the new rows from the old ones. */
+                item.existingChecked = true;
+                item.rowsBeforeBooking = costRegionRows().map(t => String(t).replace(/\s+/g, ' ').trim()).slice(0, 200);
+                saveWorklist(w);
             }
             const createCost = findRegionCreateButton('cost');
             if (createCost) {
@@ -3180,7 +3289,9 @@
         if (MODE === 'cost' && el('ledger')) {
             // Never book the same specification onto the same shipment twice.
             const ctx = itemInvoice(w, item);
-            const dup = alreadyBooked(item, w);
+            // The shipment page already said what is there; the invoice number on
+            // this page is then the line that was booked before, not a reason to stop.
+            const dup = item.existingChecked ? { dup: false, blind: false } : alreadyBooked(item, w);
             if (dup.dup && !w.ignoreExisting) {
                 log(`${who} already carries invoice ${ctx.invoiceNo} - skipping`);
                 skipWorklistItem(w, item, { text: `Factuur ${ctx.invoiceNo} staat al op deze zending`,
@@ -3196,6 +3307,8 @@
             setSubStatus(`${who} · ${items.length} regels boeken…`);
             item.status = 'booking';
             item.bookedLines = items.length;
+            // what goes in, line for line, for the check on the shipment afterwards
+            item.bookedItems = items.map(i => ({ desc: i.desc, amount: round2((Number(i.qty) || 0) * (Number(i.price) || 0)) }));
             if (!item.modality && mapKey('cost') === 'costRoad') item.modality = 'road';
             const worklistIndex = w.index;
             w.index++; w.attempts = 0;
@@ -3222,6 +3335,12 @@
         if (done) {
             done.status = ok ? 'done' : 'failed';
             if (!ok) noteReason(done, { text: state.failReason || 'Boeken afgebroken — controleer de zending', code: state.failReason ? '' : 'aborted' });
+            /* The run's own word is not the last word: the shipment is opened
+               once more and its cost rows are read back, line for line. */
+            if (w.verify && done.bookedItems && done.bookedItems.length) {
+                done.runOk = ok;
+                done.status = 'verify';
+            }
         }
         // Block any further booking until we are back on the search page, or the
         // next container's lines would land on the shipment still open here.
@@ -5783,6 +5902,11 @@
                             <span>Eén totaalregel per zending</span></label>
                     </div>
                     <div class="fip-checklist" style="margin-top:8px;">
+                        <label class="fip-check"><input type="checkbox" id="spec-verify" ${prefs.verify === false ? '' : 'checked'}>
+                            <span>Na het boeken de zending opnieuw openen en controleren of elke regel erop staat</span></label>
+                    </div>
+                    <div class="fip-hint">Kost per zending één extra zoekopdracht. Een regel die FitOn weigerde (bijvoorbeeld zonder btw-bedrag) komt dan als <i>onvolledig</i> in het rapport, in plaats van als geboekt.</div>
+                    <div class="fip-checklist" style="margin-top:8px;">
                         <label class="fip-check"><input type="checkbox" id="spec-ignore-existing">
                             <span>Ook boeken als dezelfde bedragen al op de zending staan</span></label>
                     </div>
@@ -6328,7 +6452,8 @@
             return {
                 descMode: $('spec-descmode').value,
                 combine: combineEl && combineEl.value === 'combine',
-                ignoreExisting: !!($('spec-ignore-existing') && $('spec-ignore-existing').checked)
+                ignoreExisting: !!($('spec-ignore-existing') && $('spec-ignore-existing').checked),
+                verify: !!($('spec-verify') && $('spec-verify').checked)
             };
         }
 
@@ -6359,7 +6484,7 @@
                 if (!go) return false;
             }
             localStorage.setItem('fiton_spec_prefs', JSON.stringify({
-                descMode: opts.descMode, combine: opts.combine
+                descMode: opts.descMode, combine: opts.combine, verify: !!opts.verify
             }));
             saveWorklist({
                 running: true, index: 0, attempts: 0,
@@ -6379,6 +6504,7 @@
                    fold the 34 invoices of one afternoon into one dossier. */
                 batchId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
                 ignoreExisting: !!opts.ignoreExisting,
+                verify: !!opts.verify,
                 /* What was read per document, so the end report can go out one
                    row per invoice however many went in at once. */
                 docs: used.map(d => ({
@@ -7003,6 +7129,14 @@
             }
         }
 
+        /* The VAT amount is the page's to work out from the code, but when that
+           did not happen the form refuses to save ("VAT amount" required). The
+           default code is 0%, so an amount left empty is 0. */
+        const vatAmountField = el('vatAmount');
+        if (vatAmountField && String(vatAmountField.value || '').trim() === '' && String(vatSeq) === String(DEFAULT_VAT_SEQ)) {
+            setNativeValue(vatAmountField, '0');
+            log('VAT amount was empty - set to 0');
+        }
     }
 
     /* Wait until nothing is on the way to the server any more. The counter comes

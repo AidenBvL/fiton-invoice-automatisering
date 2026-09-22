@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FitOn Invoice Automation",
-  "version": "9.24.0",
+  "version": "9.25.0",
   "description": "Books revenue and cost lines on FitOnPortal from per-client rate templates, with review before anything is written.",
   "minimum_chrome_version": "110",
   "update_url": "https://REPLACE-ME.example.com/fiton/updates.xml",

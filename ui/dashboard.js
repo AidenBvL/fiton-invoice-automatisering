@@ -61,7 +61,9 @@ const TRANSPORT_STATUS = {
   notfound:  { cls: 'bad',  label: 'Niet gevonden' },
   failed:    { cls: 'bad',  label: 'Mislukt' },
   pending:   { cls: 'warn', label: 'Niet verwerkt' },
-  booking:   { cls: 'warn', label: 'Onbekend' }
+  booking:   { cls: 'warn', label: 'Onbekend' },
+  incomplete:{ cls: 'bad',  label: 'Onvolledig' },
+  verify:    { cls: 'warn', label: 'Niet gecontroleerd' }
 };
 const CONFIDENCE = {
   exact: 'Klopt met het factuurtotaal',
