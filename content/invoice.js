@@ -4838,15 +4838,29 @@
            column. The difference is what stands next to the number. */
         const isNum = t => /^[\d.,]+$/.test(t);
         const isCur = t => /^(eur|usd|gbp|dkk|chf|sek|nok|pln|€|\$)$/i.test(t);
+        const isPct = t => /^\d+([.,]\d+)?%$/.test(t) || t === '%';           // "0%", or the % left after its figure
+        const isVatWord = t => /^(vat|btw|tax|tva|mwst|ust|iva|moms)\.?$/i.test(t);
+        const isCode = t => /^[A-Z]{2}$/.test(t);                                // DK, NL: the tax country column
+        const columnish = t => isNum(t) || isCur(t) || isPct(t) || UNIT_WORD.test(t) || isCode(t) || isVatWord(t);
         const last = () => tokens[tokens.length - 1];
 
+        /* Maersk ends every line in its rate columns - "Documentation fee 1 DOC
+           EUR DK VAT 0%" - and the 0% stopped the stripping before it began, so
+           the columns were booked as part of the description. The VAT word and
+           the country code only go when what stands before them is a column
+           too: "Import VAT" is a charge and keeps its name. */
         let previous = null;
-        for (let i = 0; i < 6 && tokens.length > 1; i++) {
+        for (let i = 0; i < 8 && tokens.length > 1; i++) {
             const t = last();
+            const before = tokens[tokens.length - 2];
             if (isCur(t)) { tokens.pop(); previous = 'currency'; continue; }
+            if (isPct(t)) { tokens.pop(); previous = 'unit'; continue; }
             // the "x" of "1,00 x 82,50" once its figures are gone: "Keuren x"
             if (/^(x|×|\*|à|@)$/i.test(t)) { tokens.pop(); previous = 'unit'; continue; }
-            if (UNIT_WORD.test(t) && tokens.length > 2 && isNum(tokens[tokens.length - 2])) {
+            if (isVatWord(t) && previous !== null && columnish(before)) { tokens.pop(); previous = 'unit'; continue; }
+            if (isCode(t) && (previous === 'unit' || previous === 'currency')
+                && (isCur(before) || isNum(before) || UNIT_WORD.test(before))) { tokens.pop(); previous = 'unit'; continue; }
+            if (UNIT_WORD.test(t) && tokens.length > 2 && isNum(before)) {
                 tokens.pop(); previous = 'unit'; continue;
             }
             if (isNum(t) && (previous === null || previous === 'currency' || previous === 'unit')) {

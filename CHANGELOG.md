@@ -1,5 +1,18 @@
 # Wat er veranderd is
 
+## 9.25.1
+
+**Omschrijvingen zonder de kolommen erachter.** Maersk sluit elke regel af met
+zijn tariefkolommen — *Documentation fee - Destination 1 DOC EUR DK VAT 0%* — en
+dat kwam zo op de boeking. De opschoning stript de aantal-, eenheid-, valuta- en
+btw-kolommen van achteren, maar strandde meteen op *0%*. Percentages, het
+btw-woord en de landcode (*DK*, *NL*) gaan nu ook, met een grens: het btw-woord
+en de landcode alleen als wat ervóór staat óók een kolom is, zodat *Import VAT*
+gewoon *Import VAT* blijft. Het geldt voor elke leverancier die zo'n staart
+schrijft; de drie facturen bij de hand lezen als *Documentation fee -
+Destination*, *Terminal Handling Service - Destination* en *Container Protect
+Essential*, met dezelfde bedragen en totalen als eerst.
+
 ## 9.25.0
 
 **Na het boeken wordt de zending nagelezen.** Een Maersk-factuur van drie regels
