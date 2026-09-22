@@ -4580,7 +4580,7 @@
         { re: /isps|ispc|ship and port facility/i,                             led: () => LEDGER.isps },
         { re: /security (charge|fee)|terminal security|port security/i,        led: () => LEDGER.terminalSecDest },
         { re: /admin(istration)? fee|import handling fee|import service charge/i, led: () => LEDGER.adminFeeDest },
-        { re: /equipment (maintenance|mainten|management)|container management/i, led: () => LEDGER.equipMaintenance },
+        { re: /equipment (maintenance|mainten|management)|container (management|maintenance)/i, led: () => LEDGER.equipMaintenance },
         { re: /container (inspection|survey)|inspection (&|and) survey|equipment inspection/i, led: () => LEDGER.containerInspect },
         { re: /carrier haulage|haulage fee/i,                                  led: () => LEDGER.trucking },
         { re: /container protect/i,                                            led: () => LEDGER.containerProtect },
@@ -5157,15 +5157,33 @@
                When the row itself says nothing a ledger can be read from, the
                nearest heading above it that does is put in front. A row that
                already names its own charge is never touched. */
-            if (ledgerIsGuess(desc)) {
+            /* CMA CGM goes one further: the name stands on a line of its own
+               above the columns - "Container maintenance Fee at destination"
+               over "40RH C C2 1 UNI" - so the row itself says nothing at all.
+               Then the nearest line of words above is the name, whether or not
+               it names a ledger, and it replaces the row rather than prefixing
+               it. A name cut off at "at" carries on below the figures with a
+               word in lower case ("destination"); that word is taken along. */
+            const wordy = t => /[A-Za-z]{3}/.test(String(t).replace(CURRENCY_RE, ''));
+            const weak = isWeakDesc(desc);
+            if (ledgerIsGuess(desc) || weak) {
                 for (let j = rowIndex - 1; j >= 0 && rowIndex - j <= 4; j--) {
                     const above = rows[j];
                     if (moneyCellsOf(above).length) break;      // another charge, not a heading
                     const heading = above.raw.trim();
-                    if (heading.length <= 60 && !isColumnHeader(heading) && !ledgerIsGuess(heading)) {
-                        desc = `${heading} - ${desc}`;
+                    if (heading.length > 60 || isColumnHeader(heading)) continue;
+                    if (weak ? !wordy(heading) : ledgerIsGuess(heading)) continue;
+                    let name = heading;
+                    for (let k = rowIndex + 1; k <= rowIndex + 2 && k < rows.length; k++) {
+                        const below = rows[k];
+                        if (moneyCellsOf(below).length) break;
+                        const tail = below.raw.trim();
+                        if (!wordy(tail)) continue;             // "C2 EUR" between the figures and the wrap
+                        if (/^[a-z]/.test(tail) && !/\d/.test(tail) && tail.length <= 40) name += ' ' + tail;
                         break;
                     }
+                    desc = weak ? name : `${name} - ${desc}`;
+                    break;
                 }
             }
 
