@@ -2645,6 +2645,7 @@
         blindCheck: () => 'Duplicate check not possible (description carries no invoice number)',
         aborted: () => 'Booking stopped — check the shipment',
         linesAlreadyThere: a => `${a.present} of ${a.total} lines were on the shipment already; only the missing ${a.missing} booked`,
+        bookedThisRun: a => `${a.unit || 'This container'} appears twice on invoice ${a.invoice}; its charges were booked at the first mention`,
         linesMissing: a => `After booking, ${a.found} of ${a.total} lines are on the shipment. Missing: `
             + (a.missing || []).map(m => `${m.desc} (${money(m.amount)})`).join(', ')
     };
@@ -3229,8 +3230,18 @@
                     noteReason(item, { text: `${present} van de ${total} regels stond al op de zending; alleen de ontbrekende ${missing.length} geboekt`,
                         code: 'linesAlreadyThere', args: { present, total, missing: missing.length } });
                 } else if (existing) {
-                    log(`${who}: ${existing.text} - skipping`);
-                    skipWorklistItem(w, item, existing, who);
+                    /* The same container, the same invoice, booked a moment ago
+                       in this very run: the invoice lists the box twice. Say
+                       that, rather than "already on this shipment", which reads
+                       as if the run had done nothing. */
+                    const twin = w.items.find(o => o !== item && o.status === 'done'
+                        && invoiceKey(w, o) === invoiceKey(w, item) && unitKey(o) && unitKey(o) === unitKey(item));
+                    const reason = twin
+                        ? { text: `${transportName(item) || 'Deze container'} staat twee keer op factuur ${itemInvoice(w, item).invoiceNo}; de kosten zijn bij de eerste vermelding geboekt`,
+                            code: 'bookedThisRun', args: { unit: transportName(item), invoice: itemInvoice(w, item).invoiceNo } }
+                        : existing;
+                    log(`${who}: ${reason.text} - skipping`);
+                    skipWorklistItem(w, item, reason, who);
                     return;
                 }
                 item.existingChecked = true;
