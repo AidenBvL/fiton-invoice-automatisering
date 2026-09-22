@@ -1,5 +1,20 @@
 # Wat er veranderd is
 
+## 9.25.3
+
+**Een container met het aantal erachter werd geen container.** Samskip schrijft
+*HMMU5493213 1 x 40ft Reefer Container*, en het patroon voor een containernummer
+stond na de zeven cijfers nog een los cijfer toe — bedoeld voor schrijfwijzen
+als *CGMU 803082/7*. Het aantal werd zo een achtste cijfer, HMMU54932131 is geen
+container, en de enige container op de factuur werd niet gevonden. Het patroon
+is nu strikt: zeven cijfers, óf zes en een los controlecijfer.
+
+Daarbij telt nu het controlecijfer van ISO 6346 mee: staan er op een pagina
+twee nummers die op een container lijken, dan wint het nummer dat klopt. Het is
+geen poortwachter — een rederij kan er een verkeerd afdrukken, en een eenzaam
+nummer telt ook zonder — maar wel de doorslag waar een factuurnummer of
+boekingsnummer dezelfde vorm heeft.
+
 ## 9.25.2
 
 **De nacontrole leest de lijst onder het formulier, niet de zending opnieuw.**

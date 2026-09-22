@@ -4705,11 +4705,28 @@
        not read as a container at all - so nothing is looked up and the shipment
        is never found. The letters are allowed to be spaced apart here and the
        spaces are dropped before the number is checked. */
-    const CONTAINER_ANY = /\b([A-Z](?:[ ]?[A-Z]){3})[- ]?(\d{6,7})[- \/]?(\d?)\b/;
+    /* Seven digits, or six and the check digit set apart (CGMU 803082/7).
+       Not "six or seven and then maybe one more": Samskip writes "HMMU5493213
+       1 x 40ft Reefer Container", and the quantity behind the box was read as
+       an eighth digit - so the one container on the invoice was no container,
+       and nothing was looked up. */
+    const CONTAINER_ANY = /\b([A-Z](?:[ ]?[A-Z]){3})[- ]?(\d{7}|\d{6}[- \/]?\d)\b/;
     /* ISO 6346: the fourth letter is the equipment category - U, J or Z. That
        keeps an invoice number such as NLIC0126788 (four letters, seven digits)
        from being taken for a container and opening a group of its own. */
     const isContainerNo = c => /^[A-Z]{3}[UJZ]\d{7}$/.test(c);
+    /* The check digit of ISO 6346: letters count from A = 10, skipping the
+       multiples of 11, every position weighs 2^i, the sum modulo 11 (a 10
+       counts as 0) is the last digit. Not a gate - a carrier can misprint one -
+       but where a page offers two numbers that look like a box, the one that
+       checks out is the box. */
+    function containerCheckDigitOk(c) {
+        if (!/^[A-Z]{4}\d{7}$/.test(c)) return false;
+        const VALUES = '0123456789A?BCDEFGHIJK?LMNOPQRSTU?VWXYZ';        // A = 10, and 11, 22, 33 are skipped
+        let sum = 0;
+        for (let i = 0; i < 10; i++) sum += VALUES.indexOf(c[i]) * Math.pow(2, i);
+        return (sum % 11) % 10 === Number(c[10]);
+    }
     const REF_ANY = /\b(\d{9,11})\b/;
 
     /* What a charge is about. A container is only one kind of unit: a road
@@ -4752,11 +4769,14 @@
            block of charges went looking for a shipment with nothing to look it
            up by. */
         const re = new RegExp(CONTAINER_ANY.source, 'g');
-        let cm;
+        let cm, first = null;
         while ((cm = re.exec(s))) {
-            const c = (cm[1] + cm[2] + (cm[3] || '')).replace(/\s+/g, '').toUpperCase();
-            if (isContainerNo(c)) return { kind: 'container', value: c, text: cm[0] };
+            const c = (cm[1] + cm[2]).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+            if (!isContainerNo(c)) continue;
+            if (containerCheckDigitOk(c)) return { kind: 'container', value: c, text: cm[0] };
+            if (!first) first = { kind: 'container', value: c, text: cm[0] };
         }
+        if (first) return first;
         for (const u of LABELLED_UNITS) {
             const m = u.re.exec(s);
             if (!m || !(u.ok ? u.ok(m[1]) : /\d/.test(m[1]))) continue;
@@ -4800,7 +4820,7 @@
 
         // the unit as it stands on the page: "Kenteken OV-12-AB", "MAWB 176-12345675"
         if (container) t = t.replace(new RegExp(container.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'), 'gi'), ' ');
-        t = t.replace(/\b[A-Z]{4}[- ]?\d{6,7}[- \/]?\d?\b/g, ' ');     // any other container
+        t = t.replace(/\b[A-Z]{4}[- ]?(?:\d{7}|\d{6}[- \/]?\d)\b/g, ' ');     // any other container
         t = t.replace(/\s{2,}/g, ' ').trim();
 
         let tokens = t.split(/\s+/).filter(Boolean);
@@ -5265,7 +5285,7 @@
 
     const MONEY = '[\\d][\\d.,]*';
     // OERU-422507-2 and OERU4225072 are the same box
-    const CONTAINER_RE = /\b([A-Z]{4})[- ]?(\d{6,7})[- \/]?(\d?)\b/g;
+    const CONTAINER_RE = /\b([A-Z]{4})[- ]?(\d{7}|\d{6}[- \/]?\d)\b/g;
     /* FitOn shipment ids: ten digits, the first one says what kind of file it
        is - 1002... sea freight, 2002... road, 3002... air. All three are found
        under "Shipment id" on the Search page. 4003... is an invoice file and is
