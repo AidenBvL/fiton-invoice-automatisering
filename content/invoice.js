@@ -2645,7 +2645,9 @@
         blindCheck: () => 'Duplicate check not possible (description carries no invoice number)',
         aborted: () => 'Booking stopped — check the shipment',
         linesAlreadyThere: a => `${a.present} of ${a.total} lines were on the shipment already; only the missing ${a.missing} booked`,
-        bookedThisRun: a => `${a.unit || 'This container'} appears twice on invoice ${a.invoice}; its charges were booked at the first mention`,
+        bookedThisRun: a => a.sameDoc
+            ? `${a.unit || 'This container'} appears twice on invoice ${a.invoice}; its charges were booked at the first mention`
+            : `Invoice ${a.invoice} was read in twice; the charges of ${a.unit || 'this container'} were booked with the first copy`,
         linesMissing: a => `After booking, ${a.found} of ${a.total} lines are on the shipment. Missing: `
             + (a.missing || []).map(m => `${m.desc} (${money(m.amount)})`).join(', ')
     };
@@ -3234,11 +3236,15 @@
                        in this very run: the invoice lists the box twice. Say
                        that, rather than "already on this shipment", which reads
                        as if the run had done nothing. */
-                    const twin = w.items.find(o => o !== item && o.status === 'done'
-                        && invoiceKey(w, o) === invoiceKey(w, item) && unitKey(o) && unitKey(o) === unitKey(item));
+                    const invoiceNo = itemInvoice(w, item).invoiceNo;
+                    const twin = w.items.find(o => o !== item && o.status === 'done' && invoiceNo
+                        && itemInvoice(w, o).invoiceNo === invoiceNo && unitKey(o) && unitKey(o) === unitKey(item));
+                    const sameDoc = twin && invoiceKey(w, twin) === invoiceKey(w, item);
                     const reason = twin
-                        ? { text: `${transportName(item) || 'Deze container'} staat twee keer op factuur ${itemInvoice(w, item).invoiceNo}; de kosten zijn bij de eerste vermelding geboekt`,
-                            code: 'bookedThisRun', args: { unit: transportName(item), invoice: itemInvoice(w, item).invoiceNo } }
+                        ? { text: sameDoc
+                                ? `${transportName(item) || 'Deze container'} staat twee keer op factuur ${invoiceNo}; de kosten zijn bij de eerste vermelding geboekt`
+                                : `Factuur ${invoiceNo} is twee keer ingelezen; de kosten van ${transportName(item) || 'deze container'} zijn bij de eerste geboekt`,
+                            code: 'bookedThisRun', args: { unit: transportName(item), invoice: invoiceNo, sameDoc: !!sameDoc } }
                         : existing;
                     log(`${who}: ${reason.text} - skipping`);
                     skipWorklistItem(w, item, reason, who);
@@ -6036,7 +6042,18 @@
                     } else {
                         const keep = read.bytes && read.bytes.byteLength <= MAX_REPORT_DOC_BYTES
                             ? { name: file.name, base64: bytesToBase64(read.bytes) } : null;
-                        docs.push(Object.assign(makeDoc(file.name, 'file', parsed, keep), { size: file.size }));
+                        const doc = Object.assign(makeDoc(file.name, 'file', parsed, keep), { size: file.size });
+                        /* The same invoice under another file name - a download
+                           saved twice - would book once and then skip itself as
+                           "already on this shipment". Same number, same total:
+                           it is left unticked, and says why. */
+                        const twin = docs.find(d => !d.error && d.invoiceNo && d.invoiceNo === doc.invoiceNo
+                            && Math.abs((d.parsed.calcTotal || 0) - (parsed.calcTotal || 0)) < 0.02);
+                        if (twin) {
+                            doc.duplicateOf = twin.name;
+                            parsed.transports.forEach(tr => { tr.pick = false; });
+                        }
+                        docs.push(doc);
                     }
                 } catch (err) {
                     log('PDF read failed', { file: file.name, error: err.message });
@@ -6109,6 +6126,7 @@
             if (d.parsed.isCredit) bits.push('creditnota');
             if (d.parsed.skippedVat) bits.push(`btw ${money(d.parsed.skippedVat)} niet geboekt`);
             if (d.parsed.edited) bits.push('handmatig aangepast');
+            if (d.duplicateOf) bits.push('dubbel ingelezen');
             if (guessed) bits.push(`${guessed} regel(s) zonder zeker grootboek`);
             return esc(bits.join(' · ')) + (d.parsed.confidence === 'exact'
                 ? ' <span class="fip-badge is-ok">totaal klopt</span>'
@@ -6142,7 +6160,8 @@
                             <input type="text" data-credseq="${d.id}" value="${esc(d.creditorSeq)}" placeholder="bijv. 71587">
                         </div>
                     </div>
-                    <div class="fip-hint" data-credhint="${d.id}">${esc(d.creditorHint)}</div>`}
+                    <div class="fip-hint" data-credhint="${d.id}">${esc(d.creditorHint)}</div>
+                    ${d.duplicateOf ? `<div class="fip-hint" style="color:var(--fip-warn-text)">Zelfde factuurnummer en totaal als ${esc(d.duplicateOf)} — dit is dezelfde factuur nog een keer. Staat uit; vink hem aan als hij toch apart geboekt moet worden.</div>` : ''}`}
                 </div>`).join('');
             docs.forEach(d => {
                 const sel = overlay.querySelector(`[data-cred="${d.id}"]`);

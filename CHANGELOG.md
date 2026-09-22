@@ -1,5 +1,17 @@
 # Wat er veranderd is
 
+## 9.25.6
+
+**Dezelfde factuur twee keer ingesleept.** Een rapport van 15 facturen telde
+7557036174 twee keer: dezelfde nota onder twee bestandsnamen. De eerste boekte
+MNBU0363247, de tweede trof de regel aan en werd overgeslagen met "staat al op
+deze zending" — correct, maar verwarrend. Het inleesvenster herkent dat nu:
+een document met hetzelfde factuurnummer en hetzelfde totaal als een eerder
+ingelezen document staat uit, met de melding dat het dezelfde factuur nog een
+keer is. Aanvinken kan altijd. En gebeurt het toch, dan zegt het rapport wat er
+gebeurde: *Factuur 7557036174 is twee keer ingelezen; de kosten van MNBU0363247
+zijn bij de eerste geboekt.*
+
 ## 9.25.5
 
 **"Staat al op deze zending" terwijl de run hem net boekte.** Een zending komt
