@@ -1,5 +1,18 @@
 # Wat er veranderd is
 
+## 9.25.2
+
+**De nacontrole leest de lijst onder het formulier, niet de zending opnieuw.**
+In 9.25.0 werd elke zending na het boeken opnieuw opgezocht om de kostenregels
+na te lezen — een extra zoekopdracht per zending. Dat is niet nodig: na de
+laatste Create komt het formulier leeg terug met daaronder de lijst van alle
+regels op de zending, dezelfde lijst waar de teller "row(s) 1 - 3 of 3" bij
+hoort. Die wordt nu direct gelezen, tegen een nulmeting van dezelfde lijst bij
+de start van het boeken, zodat rijen van een andere factuur nooit voor de onze
+doorgaan. Elke regel wordt op bedrag en factuurnummer teruggevonden; ontbreekt
+er een, dan staat de zending als *onvolledig* in het rapport en het dashboard,
+met de regels erbij. Het vinkje en de heropen-lus uit 9.25.0 zijn weg.
+
 ## 9.25.1
 
 **Omschrijvingen zonder de kolommen erachter.** Maersk sluit elke regel af met
