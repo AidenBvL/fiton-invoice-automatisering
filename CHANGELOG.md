@@ -1,5 +1,22 @@
 # Wat er veranderd is
 
+## 9.25.4
+
+**CMA CGM-omschrijvingen.** CMA CGM zet de naam van een kostenregel op een eigen
+regel boven de kolommen — *Container maintenance Fee at destination* boven
+*40RH C C2 1 UNI* — en het afgebroken laatste woord (*destination*) nog onder
+het bedrag. De regel zelf zei dus niets, de naam kwam er alleen vóór als hij
+een grootboek opleverde, en het losse woord raakte kwijt: *Terminal Handling
+Charge (DTHC) at - 40RH C*, en *40RH C C2* op Diversen. Zegt een regel zelf
+niets, dan is nu de dichtstbijzijnde regel met woorden erboven de naam, met of
+zonder grootboek, en vervangt die de kolommen in plaats van ervoor te komen. Een
+naam die op *at* afbreekt krijgt het kleine-letterwoord onder de cijfers erbij.
+De factuur leest nu als *Terminal Handling Charge (DTHC) at destination*,
+*Container maintenance Fee at destination* (op 4984 Equipment Maintenance),
+*Container inspection & Survey Fee at destination* en *Documentation Fee at
+destination*; bedragen en totaal ongewijzigd. De andere vier facturen bij de
+hand lezen precies als eerst.
+
 ## 9.25.3
 
 **Een container met het aantal erachter werd geen container.** Samskip schrijft
