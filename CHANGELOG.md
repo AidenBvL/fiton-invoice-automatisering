@@ -1,5 +1,18 @@
 # Wat er veranderd is
 
+## 9.25.5
+
+**"Staat al op deze zending" terwijl de run hem net boekte.** Een zending komt
+alleen op *Overgeslagen* als het factuurnummer al op de zending stond vóórdat er
+geboekt werd — een zending die in de run zelf geboekt is, wordt nooit daarna nog
+overgeslagen. Het gebeurt wel als een factuur dezelfde container twee keer noemt:
+de eerste vermelding boekt de kosten, de tweede treft ze aan en wordt
+overgeslagen, en het rapport zei dan alleen "staat al op deze zending". Dat leest
+alsof de run niets gedaan heeft. Nu staat er wat er gebeurde: *MNBU0363247 staat
+twee keer op factuur 7557036174; de kosten zijn bij de eerste vermelding geboekt*.
+Staat er nog steeds "staat al op deze zending", dan stond hij er echt al — uit een
+eerdere run of met de hand.
+
 ## 9.25.4
 
 **CMA CGM-omschrijvingen.** CMA CGM zet de naam van een kostenregel op een eigen
