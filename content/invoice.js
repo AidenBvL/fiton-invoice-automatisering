@@ -3567,6 +3567,7 @@
         };
 
         let best = null, bestScore = 0;
+        const hayCompact = hay.replace(/[^a-z0-9]/g, '');
         for (const c of candidates) {
             const needle = normalise(c.name);
             if (needle.length < 5) continue;
@@ -3582,6 +3583,13 @@
                 // Whole words only. Substring matching turns "Tetracyclines" into
                 // a hit for "W.E.C. Lines".
                 if (words.length >= 2 && words.every(asWord)) score = words.join('').length;
+            }
+            /* Or the name set with letter spacing, as Yang Ming prints its own:
+               "Y AN G M I N G  (N ET H ERLAN DS)  BV". With every space and
+               dot gone it is the name again; only a long one counts this way. */
+            if (!score) {
+                const compact = needle.replace(/[^a-z0-9]/g, '');
+                if (compact.length >= 10 && hayCompact.includes(compact)) score = compact.length;
             }
             if (score > bestScore) { best = c; bestScore = score; }
         }
@@ -4152,7 +4160,7 @@
        for "%" is 8 and for ")" is 12, written as \b and \f. */
     const PDF_ESCAPE = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' };
     const unescapePdf = t => t.replace(/\\(\d{1,3})/g, (m, o) => String.fromCharCode(parseInt(o, 8)))
-                             .replace(/\\\r?\n/g, '')
+                             .replace(/\\(?:\r\n|\r|\n)/g, '')          // a line broken inside the string
                              .replace(/\\([()\\nrtbf])/g, (m, c) => PDF_ESCAPE[c] || c);
 
     /* A "( ... )" string of a two-byte font. Cosco writes its Identity-H text
@@ -4199,6 +4207,7 @@
 
     function pdfFragments(content, fontTables) {
         let glyphs = null;                       // table of the font in use
+        let fontSize = 1;                        // as set by Tf; the text matrix scales it
         const frags = [];
         let x = 0, y = 0, lineX = 0, lineY = 0, leading = 0;
         /* Td moves in text space, so it has to go through the scale of the last
@@ -4207,12 +4216,21 @@
            row together, so an amount landed on another row than its charge. */
         let ma = 1, mb = 0, mc = 0, md = 1;
         const move = (tx, ty) => { lineX += tx * ma + ty * mc; lineY += tx * mb + ty * md; x = lineX; y = lineY; };
-        const tok = /(\/[A-Za-z0-9#+.-]+)\s+[-\d.]+\s+Tf|\[((?:[^\]\\]|\\.)*)\]\s*TJ|\(((?:[^)\\]|\\.)*)\)\s*Tj|<([0-9A-Fa-f\s]+)>\s*Tj|BT|ET|([-\d.]+)\s+([-\d.]+)\s+Td|([-\d.]+)\s+([-\d.]+)\s+TD|([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+Tm|T\*|([-\d.]+)\s+TL/g;
+        /* Escapes may hide any character, a bare carriage return included:
+           Hapag-Lloyd breaks its lines inside the string with backslash-CR, and
+           "\\." did not match that, so every such string - the whole body of
+           the invoice - was skipped and only the footer came through.
+           The ' and " operators are "next line, then show": Yang Ming writes
+           every charge with ', and without them the line position never moved
+           and the amounts landed on rows in the header. */
+        const tok = /(\/[A-Za-z0-9#+.-]+)\s+[-\d.]+\s+Tf|\[((?:[^\]\\]|\\[\s\S])*)\]\s*TJ|\(((?:[^)\\]|\\[\s\S])*)\)\s*Tj|<([0-9A-Fa-f\s]+)>\s*Tj|BT|ET|([-\d.]+)\s+([-\d.]+)\s+Td|([-\d.]+)\s+([-\d.]+)\s+TD|([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+Tm|T\*|([-\d.]+)\s+TL|(?:[-\d.]+\s+[-\d.]+\s+)?\(((?:[^)\\]|\\[\s\S])*)\)\s*["']|(?:[-\d.]+\s+[-\d.]+\s+)?<([0-9A-Fa-f\s]+)>\s*["']/g;
         let m;
         while ((m = tok.exec(content))) {
             const op = m[0];
             if (m[1] !== undefined) {                       // /F1 9 Tf - font switch
                 glyphs = fontTables && fontTables.get ? (fontTables.get(m[1]) || null) : null;
+                const size = /\s([-\d.]+)\s+Tf$/.exec(op);
+                fontSize = size ? Math.abs(parseFloat(size[1])) || 1 : 1;
             }
             else if (op === 'BT') { x = y = lineX = lineY = 0; ma = md = 1; mb = mc = 0; }
             else if (m[5] !== undefined) { move(parseFloat(m[5]), parseFloat(m[6])); }
@@ -4225,20 +4243,25 @@
             else if (m[15] !== undefined) { leading = parseFloat(m[15]); }
             else if (m[2] !== undefined) {                  // [ ... ] TJ
                 let text = '';
-                for (const part of m[2].matchAll(/\(((?:[^)\\]|\\.)*)\)|<([0-9A-Fa-f\s]+)>|(-?\d+(?:\.\d+)?)/g)) {
+                for (const part of m[2].matchAll(/\(((?:[^)\\]|\\[\s\S])*)\)|<([0-9A-Fa-f\s]+)>|(-?\d+(?:\.\d+)?)/g)) {
                     if (part[1] !== undefined) text += decodeLiteralString(part[1], glyphs);
                     else if (part[2] !== undefined) text += decodeHexString(part[2], glyphs);
                     else if (parseFloat(part[3]) < -100) text += ' ';   // wide kern = column gap
                 }
-                if (text.trim()) frags.push({ x, y, text });
+                if (text.trim()) frags.push({ x, y, text, size: fontSize * Math.hypot(ma, mb) });
             }
             else if (m[3] !== undefined) {                  // ( ... ) Tj
                 const text = decodeLiteralString(m[3], glyphs);
-                if (text.trim()) frags.push({ x, y, text });
+                if (text.trim()) frags.push({ x, y, text, size: fontSize * Math.hypot(ma, mb) });
             }
             else if (m[4] !== undefined) {                  // < ... > Tj
                 const text = decodeHexString(m[4], glyphs);
-                if (text.trim()) frags.push({ x, y, text });
+                if (text.trim()) frags.push({ x, y, text, size: fontSize * Math.hypot(ma, mb) });
+            }
+            else if (m[16] !== undefined || m[17] !== undefined) {   // ( ... ) ' or "  - next line, then show
+                move(0, -leading);
+                const text = m[16] !== undefined ? decodeLiteralString(m[16], glyphs) : decodeHexString(m[17], glyphs);
+                if (text.trim()) frags.push({ x, y, text, size: fontSize * Math.hypot(ma, mb) });
             }
         }
         return frags;
@@ -4479,12 +4502,29 @@
             });
             [...byLine.entries()].sort((a, b) => b[0] - a[0]).forEach(([y, list]) => {
                 const cells = list.sort((a, b) => a.x - b.x)
-                    .map(f => ({ x: f.x, text: f.text.trim() }))
+                    .flatMap(splitColumns)
                     .filter(c => c.text);
                 if (cells.length) rows.push({ y, sheet, cells, raw: cells.map(c => c.text).join(' ').replace(/\s+/g, ' ').trim() });
             });
         });
         return rows;
+    }
+
+    /* A line typed out in a monospace font with the columns padded by spaces -
+       Hapag-Lloyd writes "ADMIN FEE DEST      65,00 EUR    1 BIL    65,00 EUR"
+       as one string - is one fragment, so the amount had nothing to its left
+       and the row was no charge. Such a string is cut at every run of spaces
+       into cells placed by character offset: in a monospace font that is the
+       column, and the same offset on every row keeps the amounts aligned. */
+    function splitColumns(f) {
+        const text = f.text;
+        if (!/\S {3,}\S/.test(text)) return [{ x: f.x, text: text.trim() }];
+        const cw = 0.6 * (f.size || 10);          // Courier: six tenths of the size per character
+        const out = [];
+        const re = /\S+(?: {1,2}\S+)*/g;
+        let m;
+        while ((m = re.exec(text))) out.push({ x: f.x + m.index * cw, text: m[0] });
+        return out;
     }
 
     /* Pasted text has no coordinates, so approximate them with the character
@@ -4595,9 +4635,9 @@
         // carrier and terminal charges
         { re: /terminal handling|(^|\b)thc\b|dthc|dest trml|terminal handling service/i, led: () => LEDGER.thc },
         { re: /isps|ispc|ship and port facility/i,                             led: () => LEDGER.isps },
-        { re: /security (charge|fee)|terminal security|port security/i,        led: () => LEDGER.terminalSecDest },
+        { re: /security (charge|fee)|terminal security|port security|tmnl security|security dest/i, led: () => LEDGER.terminalSecDest },
         { re: /admin(istration)? fee|import handling fee|import service charge/i, led: () => LEDGER.adminFeeDest },
-        { re: /equipment (maintenance|mainten|management)|container (management|maintenance)/i, led: () => LEDGER.equipMaintenance },
+        { re: /equipm\.?\s*(maintenance|mainten|management)|container (management|maintenance)/i, led: () => LEDGER.equipMaintenance },
         { re: /container (inspection|survey)|inspection (&|and) survey|equipment inspection/i, led: () => LEDGER.containerInspect },
         { re: /carrier haulage|haulage fee/i,                                  led: () => LEDGER.trucking },
         { re: /container protect/i,                                            led: () => LEDGER.containerProtect },
@@ -5656,7 +5696,8 @@
                     if (k !== i && (!r.y || Math.abs(r.y - rows[i].y) > 2.5)) continue;
                     r.cells.forEach(c => { if (c.x > label.x + 1) beside.push(c); });
                 }
-                const next = beside.sort((a, b) => a.x - b.x)[0];
+                // Yang Ming sets "Invoice No.   :   1420429B" with the colon in a cell of its own
+                const next = beside.sort((a, b) => a.x - b.x).find(c => !/^[:\-–.]+$/.test(c.text.trim()));
                 if (next && valueRe.test(next.text.trim())) return next.text.trim();
             }
             return '';
@@ -5666,7 +5707,10 @@
             /^[A-Z0-9][A-Z0-9\/-]{4,}$/);
         if (invoiceNo && (!/\d{3}/.test(invoiceNo) || /^[A-Z]{2}\d{9}B\d{2}$/i.test(invoiceNo))) invoiceNo = '';
 
-        if (!invoiceNo) invoiceNo = String(firstMatch(text, [
+        /* Hapag-Lloyd sets its title as spaced capitals: "I N V O I C E  NO.:".
+           Spaced words are closed up for this search only. */
+        const flatText = text.replace(/\b(?:[A-Z] ){3,}[A-Z]\b/g, w => w.replace(/ /g, ''));
+        if (!invoiceNo) invoiceNo = String(firstMatch(flatText, [
             /Factuurnr\.?:?\s*([A-Z0-9\/-]{4,})/i,
             /Factuurnummer\s*:?\s*([A-Z0-9\/-]{4,})/i,
             /Invoice\s*(?:no|nr|number)\.?\s*:?\s*([A-Z0-9\/-]{4,})/i,
@@ -5746,7 +5790,13 @@
            every block carries its own container, the block that carries a
            trailer instead would otherwise be handed the first container on the
            page and looked up as that shipment. */
-        const mayInherit = groups.length === 1 || !groups.some(g => g.container);
+        /* One container on the whole document, and a block of charges above
+           the line that names it: Hapag-Lloyd puts "ADMIN FEE DEST" before
+           "HLBU 9066045" and the rest of the charges after it. With a single
+           box there is nothing else the first block could belong to. */
+        const distinctContainers = new Set(groups.map(g => g.container).filter(Boolean));
+        const mayInherit = groups.length === 1 || !groups.some(g => g.container)
+            || (docUnit && docUnit.kind === 'container' && distinctContainers.size === 1 && distinctContainers.has(docUnit.value));
         groups.forEach(g => {
             if (!g.ref && pageShipment) g.ref = pageShipment;
             if (!g.ref && labelledRef) g.ref = labelledRef[1];
@@ -5754,6 +5804,13 @@
             if (docUnit && !g.unit && mayInherit && (docUnit.kind === 'container' || groups.length === 1)) g.unit = docUnit;
             g.modality = modalityOf(g, docModality);
         });
+        /* Handed the same container, two blocks are one transport - the merge
+           above ran before the container was handed down. */
+        for (let i = groups.length - 1; i > 0; i--) {
+            const key = unitKey(groups[i]);
+            const first = key && groups.slice(0, i).find(x => unitKey(x) === key && (!x.ref || !groups[i].ref || x.ref === groups[i].ref));
+            if (first) { first.lines.push(...groups[i].lines); if (!first.ref) first.ref = groups[i].ref; groups.splice(i, 1); }
+        }
 
         const isCredit = groups.length > 0 && groups.every(g => g.lines.every(l => l.amount < 0)) ;
         let confidence = 'none', note = '';
