@@ -5809,7 +5809,13 @@
         for (let i = groups.length - 1; i > 0; i--) {
             const key = unitKey(groups[i]);
             const first = key && groups.slice(0, i).find(x => unitKey(x) === key && (!x.ref || !groups[i].ref || x.ref === groups[i].ref));
-            if (first) { first.lines.push(...groups[i].lines); if (!first.ref) first.ref = groups[i].ref; groups.splice(i, 1); }
+            if (first) {
+                first.lines.push(...groups[i].lines);
+                if (!first.ref) first.ref = groups[i].ref;
+                // the totals were struck before this merge; the joined block gets its own
+                first.total = round2(first.lines.reduce((sum, l) => sum + l.amount, 0));
+                groups.splice(i, 1);
+            }
         }
 
         const isCredit = groups.length > 0 && groups.every(g => g.lines.every(l => l.amount < 0)) ;
