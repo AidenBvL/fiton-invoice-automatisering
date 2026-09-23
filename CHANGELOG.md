@@ -1,5 +1,13 @@
 # Wat er veranderd is
 
+## 9.26.1
+
+**Hapag-Lloyd stond op € 65,00 met vier regels van € 495,00.** De twee blokken
+van die factuur worden sinds 9.26.0 samengevoegd tot één zending, maar het
+zendingtotaal was al eerder in de keten bepaald en ging niet mee. Het
+samengevoegde blok krijgt nu zijn eigen totaal: € 495,00, gelijk aan de factuur.
+Bij alle acht facturen bij de hand is het zendingtotaal nu de som van de regels.
+
 ## 9.26.0
 
 **Hapag-Lloyd en Yang Ming worden gelezen.** Van Hapag-Lloyd kwam alleen de
