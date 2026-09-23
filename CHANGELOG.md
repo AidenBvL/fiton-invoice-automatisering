@@ -1,5 +1,37 @@
 # Wat er veranderd is
 
+## 9.26.0
+
+**Hapag-Lloyd en Yang Ming worden gelezen.** Van Hapag-Lloyd kwam alleen de
+voettekst binnen, van Yang Ming stonden de bedragen in de kop. Allebei zat in de
+PDF-lezer zelf, niet in de kostenherkenning:
+
+- Hapag-Lloyd breekt tekstregels binnen de tekst af met een backslash gevolgd
+  door een regeleinde. De lezer nam die escape niet aan, en daarmee viel elke
+  regel met zo'n afbreking weg — de hele factuur, op de voettekst na.
+- Yang Ming schrijft elke kostenregel met de PDF-operator `'` ("volgende regel,
+  toon tekst"). De lezer kende alleen `Tj` en `TJ`, waardoor de regelpositie
+  nooit opschoof en alles erna op de verkeerde hoogte belandde. `'` en `"`
+  worden nu gelezen.
+- Hapag-Lloyd zet elke regel in een vaste-breedte-letter als één tekst, met
+  de kolommen door spaties uit elkaar: *ADMIN FEE DEST      65,00 EUR    1 BIL*.
+  Zo'n tekst wordt nu op elke reeks spaties in cellen geknipt, geplaatst op
+  tekenpositie, zodat de bedragen een kolom vormen zoals op elke andere factuur.
+
+En wat daarna nog overbleef: de titel *I N V O I C E  NO.:* met gespatieerde
+hoofdletters wordt dichtgeschoven voor het factuurnummer; een dubbele punt in
+een eigen cel tussen *Invoice No.* en het nummer wordt overgeslagen; een
+crediteurnaam die met letterspatiëring is gezet (*Y AN G M I N G*) wordt
+herkend door spaties en punten weg te laten; een document met precies één
+container geeft die ook aan een blok kosten dat vóór de containerregel staat
+(Hapag-Lloyd zet *ADMIN FEE DEST* boven *HLBU 9066045*); en *TMNL SECURITY
+DEST* en *EQUIPM.MAINTEN.FEE* kennen hun grootboek (4985 en 4984).
+
+Hapag-Lloyd leest nu als vier regels op HLBU9066045, € 495,00; Yang Ming als
+vijf regels op YMLU5470952, € 507,00; allebei exact gelijk aan het
+factuurtotaal, met factuurnummer en crediteur. De zes andere facturen bij de
+hand lezen precies als eerst.
+
 ## 9.25.6
 
 **Dezelfde factuur twee keer ingesleept.** Een rapport van 15 facturen telde
