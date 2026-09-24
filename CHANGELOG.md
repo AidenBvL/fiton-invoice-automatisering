@@ -1,5 +1,26 @@
 # Wat er veranderd is
 
+## 9.27.0
+
+**Container onbekend in FitOn: dan op ons eigen zendingnummer.** Een ONE-factuur
+strandde op *FitOn meldt "no data found" voor dit containernummer*, terwijl
+diezelfde factuur onder CUSTOMER'S REFERENCE ons zendingnummer 1002002093
+noemt. De zoekroutine probeerde alleen de container en gaf op. Meldt FitOn nu
+"no data found" op de container en noemt de factuur een zendingnummer van ons,
+dan wordt daarop gezocht voordat de regel als niet gevonden wordt afgedaan.
+
+**ONE-factuur: factuurnummer en omschrijvingen.** Het factuurnummer werd niet
+gelezen: ONE zet *INVOICE NUMBER* op één regel, daaronder de adresregel van de
+kolom ernaast, en pas twee regels lager het nummer. De zoeker kijkt nu twee
+regels onder een label, in dezelfde kolom. De omschrijvingen sleepten de PER-
+kolom en het tarief mee (*TERMINAL HANDLING CHARGE (D) BX 370.000*): een
+eenheidswoord als *BX* of *BL* telde als tekst, en een eenheid vóór zijn tarief
+werd niet als kolom gezien. Allebei verholpen. En een naam die op een voorzetsel
+afbreekt — *CONTAINER MANAGEMENT FEE FOR* met *DISCHARGE* onder het bedrag — neemt
+dat woord nu mee, net als eerder al bij een woord in kleine letters. De factuur
+leest als vier regels op SZLU9744789, € 473,00, gelijk aan het totaal; de acht
+andere facturen bij de hand lezen precies als eerst.
+
 ## 9.26.1
 
 **Hapag-Lloyd stond op € 65,00 met vier regels van € 495,00.** De twee blokken
