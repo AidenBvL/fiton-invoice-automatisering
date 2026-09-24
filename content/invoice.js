@@ -3106,9 +3106,13 @@
            the container number or the B/L, so those come first; the rest is what
            is left to try when an invoice names neither - a trucker invoice often
            carries only the dossier number. */
-        const searchBy = item.container ? 'container'
-                       : item.unit && item.unit.kind === 'bl' ? 'unit'
+        /* A container FitOn answers "no data found" to is tried once more on
+           our own shipment id when the invoice names one (ONE prints it under
+           CUSTOMER'S REFERENCE), before the line is given up. */
+        const containerFailed = !!item.containerNotFound;
+        const searchBy = item.container && !containerFailed ? 'container'
                        : isShipmentId(item.ref) ? 'shipment'
+                       : item.unit && item.unit.kind === 'bl' ? 'unit'
                        : item.ref ? 'ref'
                        : item.unit ? 'unit' : null;       // waybill, trailer, wagon...
         const searchValue = searchBy === 'container' ? item.container
@@ -3194,6 +3198,16 @@
                 return;
             }
 
+            if (searchBy === 'container' && isShipmentId(item.ref)) {
+                log(`No shipment found for container ${searchValue} - trying shipment id ${item.ref}`);
+                setSubStatus(`${who} · container onbekend, zending ${item.ref} proberen…`);
+                item.containerNotFound = true;
+                w.attempts = 0; w.searchedAt = 0;
+                saveWorklist(w);
+                setNativeValue(field, '');
+                setTimeout(runWorklist, 500);
+                return;
+            }
             log(`No shipment found for ${who} after ${Math.round(elapsed / 1000)}s - skipping`);
             item.status = 'notfound';
             noteReason(item, noData
@@ -4917,6 +4931,8 @@
             if (UNIT_WORD.test(t) && tokens.length > 2 && isNum(before)) {
                 tokens.pop(); previous = 'unit'; continue;
             }
+            // or the unit in front of its rate, as ONE writes "BX 370.000"
+            if (UNIT_WORD.test(t) && previous === 'number') { tokens.pop(); previous = 'unit'; continue; }
             if (isNum(t) && (previous === null || previous === 'currency' || previous === 'unit')) {
                 tokens.pop(); previous = 'number'; continue;
             }
@@ -5163,7 +5179,9 @@
                Charge 1 8.5000 EUR 1.00000 0%" beat "Port Security Charge" by
                the three letters of EUR, and Cosco's column values were booked
                as part of every description. */
-            const letters = t => (String(t).replace(CURRENCY_RE, '').match(/[a-z]/gi) || []).length;
+            const letters = t => String(t).split(/\s+/)
+                .filter(tok => !UNIT_WORD.test(tok) && !new RegExp('^' + CURRENCY_RE.source + '$', 'i').test(tok))
+                .join('').replace(/[^a-z]/gi, '').length;
             const candidates = [
                 cleanDescription(leadingCells(left).join(' '), strip),
                 cleanDescription(leadingCells(right).join(' '), strip),
@@ -5230,18 +5248,23 @@
                     const heading = above.raw.trim();
                     if (heading.length > 60 || isColumnHeader(heading)) continue;
                     if (weak ? !wordy(heading) : ledgerIsGuess(heading)) continue;
-                    let name = heading;
-                    for (let k = rowIndex + 1; k <= rowIndex + 2 && k < rows.length; k++) {
-                        const below = rows[k];
-                        if (moneyCellsOf(below).length) break;
-                        const tail = below.raw.trim();
-                        if (!wordy(tail)) continue;             // "C2 EUR" between the figures and the wrap
-                        if (/^[a-z]/.test(tail) && !/\d/.test(tail) && tail.length <= 40) name += ' ' + tail;
-                        break;
-                    }
-                    desc = weak ? name : `${name} - ${desc}`;
+                    desc = weak ? heading : `${heading} - ${desc}`;
                     break;
                 }
+            }
+            /* A name cut off mid-sentence carries on below the figures: CMA CGM
+               ends on "at" and puts "destination" under the amount, ONE ends on
+               "FOR" and puts "DISCHARGE" there. A word in lower case, or a name
+               that stops on a preposition, takes the short line below along. */
+            for (let k = rowIndex + 1; k <= rowIndex + 2 && k < rows.length; k++) {
+                const below = rows[k];
+                if (moneyCellsOf(below).length) break;
+                const tail = below.raw.trim();
+                if (!wordy(tail)) continue;                     // "C2 EUR" between the figures and the wrap
+                const cutOff = /\b(?:at|for|of|to|in|on|per|and|&|-)$/i.test(desc);
+                if ((/^[a-z]/.test(tail) || cutOff) && !/\d/.test(tail) && tail.length <= 40
+                    && tail.split(/\s+/).length <= 3 && !isColumnHeader(tail) && !isTotalDesc(tail)) desc += ' ' + tail;
+                break;
             }
 
             // quantity x unit price = amount, when the row shows both
@@ -5734,10 +5757,13 @@
         if (invoiceNo && (!/\d{3}/.test(invoiceNo) || /^[A-Z]{2}\d{9}B\d{2}$/i.test(invoiceNo))) invoiceNo = '';
 
         if (!invoiceNo) {
+            /* Two rows down as well: ONE prints "INVOICE NUMBER", then the
+               addressee's line from the column beside it, then the number. */
             invoiceNo = valueNearLabel(
                 rows,
                 /^(document\s*n[°o]?|factuurnummer|factuurnr\.?|invoice\s*(no|nr|number)\.?)\s*:?$/i,
-                /^[A-Z0-9][A-Z0-9\/-]{4,}$/
+                /^[A-Z0-9][A-Z0-9\/-]{4,}$/,
+                2
             );
             if (invoiceNo && (!/\d{3}/.test(invoiceNo) || /^[A-Z]{2}\d{9}B\d{2}$/i.test(invoiceNo))) invoiceNo = '';
         }
