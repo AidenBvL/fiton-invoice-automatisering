@@ -5137,7 +5137,7 @@
                 if (unit) {
                     const rest = row.raw.replace(unit.text, '');
                     const rm = new RegExp(SHIPMENT_ID_RE.source).exec(rest) || REF_ANY.exec(rest);
-                    newGroup(unit, rm ? rm[1] : '', headingOf(rows[rowIndex - 1]));
+                    newGroup(unit, rm ? rm[1] : '', headingOf(rows[rowIndex - 1])).listed = true;
                     return;
                 }
                 /* A road shipment on a specification carries a trailer number
@@ -5328,6 +5328,9 @@
         const result = groups.filter(g => g.lines.length);
         result.labelledTotals = labelledTotals;
         result.skippedVat = skippedVat;
+        /* Every unit named on a row of its own, charges or not, in page order:
+           a block that turns out to belong to several boxes needs the list. */
+        result.listedUnits = groups.filter(g => g.listed && g.unit).map(g => g.unit);
         return result;
     }
 
@@ -5680,6 +5683,48 @@
                 log(`Dropping ${unitKey(groups[i]) || groups[i].ref || 'a transport'}: no charges left on it`);
                 groups.splice(i, 1);
             }
+        }
+
+        /* One block of charges, and a list of boxes: Maersk bills a B/L with two
+           containers as one table - "Container Protect Essential 2 CNT 28.00",
+           "Terminal Handling Service 2 CNT 385.00" - and names the containers
+           underneath, on rows of their own without an amount. The block then
+           opened without a container, and the first container on the page was
+           handed the whole invoice. Every container is its own shipment in
+           FitOn, so the block is dealt out over all of them: a quantity that is
+           a multiple of the number of boxes is divided (two at 385,00 is one
+           each), and any other line - the one documentation fee - is shared in
+           equal parts, marked (1/2) on its description. The parts still add up
+           to the invoice. A block whose own rows name a container is that
+           container's and is left alone. */
+        const listedBoxes = [...new Set((parsedGroups.listedUnits || [])
+            .filter(u => u.kind === 'container').map(u => u.value))];
+        if (groups.length === 1 && listedBoxes.length >= 2
+            && (!groups[0].container || listedBoxes.includes(groups[0].container))
+            && !groups[0].lines.some(l => l.isTransportRow)) {
+            const block = groups[0];
+            const n = listedBoxes.length;
+            const parts = listedBoxes.map(box => Object.assign({}, block, {
+                container: box, unit: { kind: 'container', value: box }, lines: [], sharedWith: listedBoxes.filter(b => b !== box)
+            }));
+            block.lines.forEach(l => {
+                const wholeQty = Math.abs(l.qty * 1000 - Math.round(l.qty * 1000)) < 1e-6 && l.qty >= n && Math.round(l.qty) % n === 0;
+                if (wholeQty) {
+                    const qty = l.qty / n;
+                    parts.forEach(p => p.lines.push(Object.assign({}, l, { qty: round3(qty), amount: round2(qty * l.unitPrice) })));
+                    return;
+                }
+                const share = round2(l.amount / n);
+                parts.forEach((p, i) => {
+                    // the last part takes the rounding, so the shares add up to the line
+                    const amount = i === n - 1 ? round2(l.amount - share * (n - 1)) : share;
+                    p.lines.push(Object.assign({}, l, { desc: `${l.desc} (${i + 1}/${n})`, qty: 1, unitPrice: amount, amount }));
+                });
+            });
+            parts.forEach(p => { p.total = round2(p.lines.reduce((sum, l) => sum + l.amount, 0)); p.subtotal = null; });
+            log(`One block of charges for ${n} containers: divided over ${listedBoxes.join(', ')}`);
+            groups.length = 0;
+            parts.forEach(p => groups.push(p));
         }
 
         // Any money value anywhere that equals the sum of everything we read is
@@ -6402,7 +6447,7 @@
                     <tr data-doc="${d.id}" data-i="${i}" class="fip-spec-row ${tr.pick ? 'is-chosen' : ''}">
                         <td><input type="checkbox" class="spec-pick" data-doc="${d.id}" data-i="${i}" ${tr.pick ? 'checked' : ''}></td>
                         <td>
-                            <div><b>${esc(transportName(tr) || 'onbekend')}</b>${tr.onPage ? ' <span class="fip-tag">deze zending</span>' : ''}</div>
+                            <div><b>${esc(transportName(tr) || 'onbekend')}</b>${tr.onPage ? ' <span class="fip-tag">deze zending</span>' : ''}${tr.sharedWith && tr.sharedWith.length ? ` <span class="fip-tag">factuur gedeeld met ${esc(tr.sharedWith.join(', '))}</span>` : ''}</div>
                             ${transportFacts(tr).length ? `<div class="fip-ledger">${esc(transportFacts(tr).join(' · '))}</div>` : ''}
                             ${transportName(tr) ? '' : '<div class="fip-ledger">geen container, eenheid of referentie herkend — kan niet worden opgezocht</div>'}
                         </td>
