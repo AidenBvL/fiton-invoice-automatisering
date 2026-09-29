@@ -1,5 +1,31 @@
 # Wat er veranderd is
 
+## 9.28.0
+
+**Eén factuur voor twee containers: de kosten worden verdeeld.** Maersk zet
+twee containers van één B/L op één factuur: de kostenregels als één tabel —
+*Container Protect Essential 2 CNT 28,00*, *Terminal Handling Service 2 CNT
+385,00*, *Documentation fee 1 DOC 50,00* — en de containers eronder in een
+lijstje, zonder bedrag. Het blok kosten opende zonder container, en de eerste
+container op de pagina (MMAU1266089) kreeg daarna de hele factuur: € 876,00 op
+één zending, en MNBU3733010 niets.
+
+Elke container is in FitOn een eigen zending, dus staat er één blok kosten
+tegenover twee of meer containers op eigen regels, dan wordt het blok nu over
+alle containers verdeeld: een aantal dat een veelvoud is van het aantal
+containers wordt uitgedeeld (twee keer € 385,00 wordt één per container), en
+elke andere regel — de ene documentation fee — gaat in gelijke delen, met
+*(1/2)* achter de omschrijving zodat op de boeking te zien is waarom er € 25,00
+staat en geen € 50,00. De delen tellen samen nog altijd op tot de factuur, en
+de controle tegen het totaal blijft gewoon staan. In het inleesvenster staat bij
+elke zending *factuur gedeeld met …*.
+
+Een blok waarvan de regels zelf een container noemen — een demurragefactuur
+die per regel de box vermeldt — is van die container en wordt niet verdeeld;
+een factuur met één container leest precies als eerst. De factuur van het
+voorbeeld leest nu als MMAU1266089 € 438,00 en MNBU3733010 € 438,00, samen
+€ 876,00, gelijk aan het totaal.
+
 ## 9.27.0
 
 **Container onbekend in FitOn: dan op ons eigen zendingnummer.** Een ONE-factuur
