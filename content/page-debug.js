@@ -189,6 +189,7 @@
     ledger: desc => call('ledger', [desc]).then(show),
     state: () => call('state').then(show),
     timing: () => call('timing').then(show),
+    costs: () => call('costs').then(show),
     diagnose: () => call('diagnose').then(show),
     marks: () => call('marks').then(show),
     version: () => call('version').then(show),

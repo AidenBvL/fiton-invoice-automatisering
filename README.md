@@ -69,6 +69,12 @@ The rate tables are sales prices. On the cost side use **Prijzen leegmaken** in
 the review screen to blank them and type the actual supplier amounts, or work
 from the *net net as per outlay* fields, which are already amount-entry.
 
+Carrier charges go the other way by themselves. Whenever a shipment page shows
+its Costs region, the extension keeps those lines for that shipment; the
+revenue dialog then lists the carrier ones under *Net net per outlay* —
+ticked, on their own ledger, at cost — before **Start template** books
+anything. `fiton.costs()` shows what was read.
+
 ---
 
 ## 4. Distribution with auto-updates
@@ -189,6 +195,7 @@ fiton.rows()          de gelezen regels met posities
 fiton.ledger('Tol')   welk grootboek een omschrijving krijgt
 fiton.state()         lopende boekrun en werklijst
 fiton.timing()        hoe lang elke regel duurde in de laatste run
+fiton.costs()         rederijkosten die het omzetformulier overneemt
 fiton.marks()         geleerde kenmerken (logo, klantnr) per crediteur
 fiton.capture(true)   POST-verzoeken opnemen (overleeft de refresh van APEX)
 fiton.requests()      opgenomen verzoeken; fiton.requests(3) toont er één helemaal

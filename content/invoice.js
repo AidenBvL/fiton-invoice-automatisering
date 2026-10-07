@@ -1515,6 +1515,14 @@
         .fip-spec-row { cursor: pointer; }
         .fip-spec-row:hover td { background: var(--fip-surface); }
         .fip-spec-row.is-chosen td { background: var(--fip-accent-soft); }
+        .fip-cc-row { cursor: default; }
+        .fip-root .fip-cc-row input.cc-desc,
+        .fip-root .fip-cc-row input.cc-price { padding: 5px 8px; font-size: 12px; min-width: 0; }
+        .fip-root .fip-cc-row input.cc-desc { flex: 1 1 auto; width: auto; }
+        .fip-root .fip-cc-row input.cc-price { flex: none; width: 92px; text-align: right; }
+        .fip-cc-row .fip-tag { white-space: nowrap; }
+        .fip-cc-row .fip-price { margin-left: 0; white-space: nowrap; }
+        #carrier-costs { margin-bottom: 14px; }
         .fip-subgroup { margin-bottom: 12px; }
         .fip-subgroup:last-child { margin-bottom: 0; }
         .fip-subgroup-title {
@@ -1722,7 +1730,16 @@
             if (qty > 0) push(ex.ledger, ex.desc, qty, ex.price, G.extras);
         });
 
-        // 12. Net net as per outlay - typed per shipment, never a fixed tariff
+        // 12. Net net as per outlay. First the carrier charges taken over from
+        //     the shipment's cost lines, each on its own ledger at cost...
+        (o.carrierCosts || []).forEach(c => {
+            if (!c.qty || !c.price) return;
+            push({ id: c.ledgerId, name: c.ledgerName }, c.desc, c.qty, c.price, G.outlay);
+            const line = items[items.length - 1];
+            line.isOutlay = true;
+            line.fromCost = true;
+        });
+        //     ...then what is typed per shipment, never a fixed tariff
         OUTLAY_ITEMS.forEach(oi => {
             const amount = (o.outlays && o.outlays[oi.key]) || 0;
             if (amount <= 0) return;
@@ -1802,11 +1819,23 @@
             const pct = parseFloat(o.dieselInput);
             if (pct <= cfg.dieselIncluded * 100) warnings.push(`Dieseltoeslag ${o.dieselInput} ligt op of onder de ${Math.round(cfg.dieselIncluded * 100)}% die al in het tarief zit — er wordt niets extra doorbelast.`);
         }
-        const outlayLines = items.filter(i => i.isOutlay);
+        const outlayLines = items.filter(i => i.isOutlay && !i.fromCost);
         if (outlayLines.length) {
             warnings.push(`${outlayLines.length} regel(s) net net per outlay — controleer de bedragen tegen de leveranciersfactuur.`);
         }
-        const negatives = items.filter(i => i.price < 0 && !/tantieme/i.test(i.desc));
+        const fromCost = items.filter(i => i.fromCost);
+        if (fromCost.length) {
+            const sum = fromCost.reduce((s, i) => s + i.qty * i.price, 0);
+            warnings.push(`${fromCost.length} rederijkost(en) overgenomen uit de inkoop van deze zending, samen ${money(sum)} — net net doorbelast.`);
+        }
+        // The same charge from the cost lines and typed by hand is charged twice.
+        OUTLAY_ITEMS.forEach(oi => {
+            if (!(o.outlays && o.outlays[oi.key] > 0) || oi.ledger === LEDGER.extraCosts) return;
+            if (fromCost.some(i => i.ledgerId === oi.ledger.id)) {
+                warnings.push(`${oi.nl} staat zowel bij de overgenomen rederijkosten als bij net net per outlay — wordt dubbel doorbelast.`);
+            }
+        });
+        const negatives = items.filter(i => i.price < 0 && !i.fromCost && !/tantieme/i.test(i.desc));
         if (negatives.length) warnings.push('Er staan onverwachte negatieve bedragen in de regels.');
 
         return warnings;
@@ -1831,7 +1860,9 @@
     }
     function upsertPreset(t, name, opts) {
         const list = loadPresets(t).filter(p => p.name !== name);
-        list.push({ name, opts });
+        // carrier costs belong to one shipment, never to a preset
+        const { carrierCosts, ...kept } = opts || {};
+        list.push({ name, opts: kept });
         savePresets(t, list);
         return list;
     }
@@ -1948,6 +1979,40 @@
         const pv = (key, fallback) => (preset[key] !== undefined ? preset[key] : fallback);
         const ck = (key, fallback) => (pv(key, fallback) ? 'checked' : '');
 
+        /* Carrier charges already on this shipment as cost lines, offered as
+           net net revenue lines. Ticked when it is certainly this shipment. */
+        const carrierSrc = carrierCostsForRevenue();
+        const carrierLines = (carrierSrc.lines || []).filter(l => l.carrier);
+        const carrierOthers = (carrierSrc.lines || []).length - carrierLines.length;
+        const carrierSure = carrierSrc.how === 'live' || carrierSrc.how === 'matched';
+        const carrierRows = carrierLines.map(l => Object.assign(carrierCostAsRevenue(l, nl), { from: l }));
+        const carrierAt = carrierSrc.at ? new Date(carrierSrc.at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '';
+        const carrierWho = carrierSrc.shipmentNo || (carrierSrc.seqs && carrierSrc.seqs[0]) || '';
+        const carrierBlock = `
+                    <div class="fip-subgroup" id="carrier-costs">
+                        <div class="fip-subgroup-title">${t('Rederijkosten uit de inkoop', 'Carrier costs from purchasing')} <span class="fip-count" id="carrier-count">0</span></div>
+                        ${carrierSrc.how === 'none' ? `<div class="fip-empty">${t(
+                            'Nog geen kosten van deze zending gelezen. Open de zending, zodat de Costs-regio in beeld is, en open dit formulier daarna opnieuw — dan staan de rederijkosten hier al ingevuld.',
+                            'No costs read for this shipment yet. Open the shipment so its Costs region shows, then open this form again - the carrier costs will be filled in here.')}</div>`
+                        : `
+                        ${carrierSrc.how === 'recent' ? `<div class="fip-banner"><span>⚠</span><div>${t(
+                            `Deze pagina zegt niet bij welke zending ze hoort. Hieronder de kosten van de laatst geopende zending${carrierWho ? ' (' + esc(carrierWho) + ')' : ''}, om ${carrierAt}. Vink alleen aan wat bij deze zending hoort.`,
+                            `This page does not say which shipment it belongs to. Below are the costs of the shipment opened last${carrierWho ? ' (' + esc(carrierWho) + ')' : ''}, at ${carrierAt}. Tick only what belongs to this shipment.`)}</div></div>` : ''}
+                        ${carrierSrc.partial ? `<div class="fip-banner"><span>⚠</span><div>${t(
+                            'De Costs-regio toonde niet alle kostenregels. Blader daar door de regels of controleer zelf of er rederijkosten ontbreken.',
+                            'The Costs region did not show every cost line. Page through it there, or check yourself that no carrier costs are missing.')}</div></div>` : ''}
+                        ${carrierRows.length ? `<div class="fip-checklist">${carrierRows.map((r, i) => `
+                            <div class="fip-check fip-cc-row">
+                                <input type="checkbox" class="cc-use" data-i="${i}" ${carrierSure ? 'checked' : ''}>
+                                <input type="text" class="fip-lineinput cc-desc" data-i="${i}" value="${esc(r.desc)}" title="${esc(r.from.desc || '')}">
+                                <span class="fip-tag" title="${esc(r.ledgerName)}${r.guessedLedger ? ' — ' + esc(r.from.ledgerText || t('grootboek niet herkend', 'ledger not recognised')) : ''}">${esc(r.ledgerId)}${r.guessedLedger ? ' ?' : ''} · ${esc(r.carrier)}</span>
+                                ${r.qty !== 1 ? `<span class="fip-price">${String(r.qty).replace('.', ',')} ×</span>` : ''}
+                                <input type="number" class="fip-lineinput fip-lineinput-amt cc-price" data-i="${i}" step="0.01" value="${Number(r.price).toFixed(2)}">
+                            </div>`).join('')}</div>`
+                        : `<div class="fip-empty">${t('Geen kostenregels van een rederij op deze zending.', 'No cost lines from a carrier on this shipment.')}</div>`}
+                        <div class="fip-hint">${t('Gelezen', 'Read')}${carrierWho ? ' ' + t('van zending', 'from shipment') + ' ' + esc(carrierWho) : ''}${carrierAt ? ' ' + t('om', 'at') + ' ' + carrierAt : ''} · ${t('tegen inkoopprijs, op het eigen grootboek', 'at cost, on their own ledger')}${carrierOthers > 0 ? ' · ' + carrierOthers + ' ' + t('andere kostenregel(s) zijn niet van een rederij en worden niet overgenomen', 'other cost line(s) are not from a carrier and are not taken over') : ''}</div>`}
+                    </div>`;
+
         const optionalDocs = (cfg.options && cfg.options.length) ? `
             <div class="fip-card">
                 <div class="fip-card-title">${t('Optionele documenten en toeslagen', 'Optional documents &amp; surcharges')}</div>
@@ -2055,6 +2120,7 @@
                     <div class="fip-hint" style="margin:-4px 0 10px;">${t(
                         'Geen tarief in de offerte — vul het werkelijke bedrag van de leveranciersfactuur in. Leeg = niet doorbelasten.',
                         'No tariff in the offer — enter the actual amount from the supplier invoice. Blank = not charged.')}</div>
+                    ${carrierBlock}
                     <div class="fip-grid">
                         ${OUTLAY_ITEMS.map(oi => `
                         <div class="fip-field">
@@ -2183,10 +2249,23 @@
                 const v = parseFloat(inp.value);
                 if (!isNaN(v) && v > 0) outlays[inp.getAttribute('data-key')] = round2(v);
             });
+
+            const carrierCosts = [];
+            document.querySelectorAll('.cc-use').forEach(cb => {
+                if (!cb.checked) return;
+                const i = cb.getAttribute('data-i');
+                const row = carrierRows[i];
+                const price = parseFloat((document.querySelector(`.cc-price[data-i="${i}"]`) || {}).value);
+                const desc = ((document.querySelector(`.cc-desc[data-i="${i}"]`) || {}).value || '').trim();
+                if (!row || isNaN(price) || !price) return;
+                carrierCosts.push({ ledgerId: row.ledgerId, ledgerName: row.ledgerName, desc: desc || row.desc,
+                                    qty: row.qty, price: round2(price), carrier: row.carrier });
+            });
             return {
                 destChoices,
                 destIds: destChoices.map(d => d.id),
                 outlays,
+                carrierCosts,
                 outlayOtherDesc: ($('outlay-other-desc') || {}).value || '',
                 outlayOtherAmount: Math.max(0, numVal('outlay-other-amount', 0)),
                 ggbEntries:     Math.max(0, Math.round(numVal('modal-ggb-entries', 0))),
@@ -2225,10 +2304,13 @@
                 extrasEl.textContent = Array.from(document.querySelectorAll('.fip-extra'))
                     .filter(i => parseFloat(i.value) > 0).length;
             }
+            const carrierEl = $('carrier-count');
+            const carrierUsed = document.querySelectorAll('.cc-use:checked').length;
+            if (carrierEl) carrierEl.textContent = carrierUsed;
             const outlayEl = $('outlay-count');
             if (outlayEl) {
                 const filled = Array.from(document.querySelectorAll('.outlay-input')).filter(i => parseFloat(i.value) > 0).length
-                    + (numVal('outlay-other-amount', 0) > 0 ? 1 : 0);
+                    + (numVal('outlay-other-amount', 0) > 0 ? 1 : 0) + carrierUsed;
                 outlayEl.textContent = filled;
             }
             $('modal-submit').disabled = n === 0;
@@ -2473,13 +2555,14 @@
        tried too rather than guessed at. */
     const BOOKING_NO_IDS = ['P606_BOOKING_NO_DISPLAY', 'P3701_BOOKING_NO_DISPLAY'];
 
-    function shipmentNoOnPage() {
+    function shipmentNoOnPage(doc) {
+        doc = doc || document;
         const value = el => (el && (el.textContent || '').trim()) || '';
         for (const id of BOOKING_NO_IDS) {
-            const v = value(document.getElementById(id));
+            const v = value(doc.getElementById(id));
             if (isShipmentId(v)) return v;
         }
-        for (const el of document.querySelectorAll('[id$="_BOOKING_NO_DISPLAY"]')) {
+        for (const el of doc.querySelectorAll('[id$="_BOOKING_NO_DISPLAY"]')) {
             const v = value(el);
             if (isShipmentId(v)) return v;
         }
@@ -3044,6 +3127,261 @@
         return texts;
     }
 
+    /* =========================================================================
+       CARRIER COSTS INTO REVENUE - net net as per outlay
+       -------------------------------------------------------------------------
+       What a shipping line charges is passed on to the client at cost, so the
+       revenue side repeats amounts that are already on the shipment as cost
+       lines. Typing them over is only a chance to get one wrong. So the Costs
+       region is read whenever a shipment page shows it, and kept per shipment;
+       the revenue dialog then lists that shipment's carrier lines, ticked,
+       each on its own ledger and at its own amount, before Start template has
+       written anything.
+       ========================================================================= */
+    const SHIPMENT_COSTS_KEY = 'fiton_shipment_costs';
+    const SHIPMENT_COSTS_KEEP = 30;                  // shipments remembered
+    const SHIPMENT_COSTS_GUESS_MS = 30 * 60 * 1000;  // see carrierCostsForRevenue
+
+    /* The booking seqs a URL carries. APEX writes them two ways: names and
+       values as two lists, f?p=10050:674:<session>::NO:RP:P674_BOOKING_SEQ,P674_RETURN_PAGE:162917,606,
+       or as query parameters, /r/<app>/<page>?p674_booking_seq=162917. */
+    function bookingSeqsIn(href) {
+        const seqs = [];
+        let url;
+        try { url = new URL(String(href || ''), location.href); } catch (e) { return seqs; }
+        const p = url.searchParams.get('p');
+        if (p) {
+            const parts = p.split(':');
+            const names = (parts[6] || '').split(',');
+            const values = (parts[7] || '').split(',');
+            names.forEach((n, i) => {
+                if (/_BOOKING_SEQ$/i.test(n) && /^\d+$/.test(values[i] || '')) seqs.push(values[i]);
+            });
+        }
+        url.searchParams.forEach((v, k) => { if (/_booking_seq$/i.test(k) && /^\d+$/.test(v)) seqs.push(v); });
+        return seqs;
+    }
+
+    /* Which shipment a page belongs to: its booking seq, from the URL, the
+       hidden page item, or - on the shipment page - the links its Create
+       buttons follow to the cost and revenue forms; and the shipment number
+       where the page shows it. Either one is enough to tell two apart. */
+    function shipmentRef(doc) {
+        doc = doc || document;
+        const seqs = new Set(bookingSeqsIn(doc.location ? doc.location.href : location.href));
+        doc.querySelectorAll('[id$="_BOOKING_SEQ"]').forEach(n => {
+            const v = String(n.value !== undefined ? n.value : (n.textContent || '')).trim();
+            if (/^\d+$/.test(v) && v !== '0') seqs.add(v);
+        });
+        if (doc === document) {
+            ['cost', 'revenue'].forEach(kind => {
+                const btn = document.querySelector(`[data-otel-label="${REGION_CREATE[kind]}"]`);
+                if (!btn) return;
+                const raw = [btn.getAttribute('href'), btn.getAttribute('onclick'), btn.getAttribute('data-link')].join(' ');
+                const links = raw.match(/f\?p=[^'"\s]+|[^'"\s]*_booking_seq=\d+[^'"\s]*/gi) || [];
+                links.forEach(l => bookingSeqsIn(l).forEach(s => seqs.add(s)));
+            });
+        }
+        return { seqs: [...seqs], shipmentNo: shipmentNoOnPage(doc) };
+    }
+
+    /* Columns of the Costs region, by their heading. VAT is tried before
+       amount, so "VAT Amount" is never taken for the amount itself. */
+    const COST_COLUMNS = [
+        ['ledger',   /ledger|grootboek|kostensoort|charge\s*type|cost\s*type/i],
+        ['desc',     /descr|omschr/i],
+        ['creditor', /credit|crediteur|supplier|leverancier|relati|vendor/i],
+        ['qty',      /^(qty|quantity|aantal)\b/i],
+        ['price',    /^(unit\s*)?(price|prijs|tarief)\b/i],
+        ['vat',      /\b(vat|btw)\b/i],
+        ['amount',   /amount|bedrag|total|totaal/i]
+    ];
+
+    const LEDGER_LIST = Object.values(LEDGER).filter((l, i, all) => all.findIndex(x => x.id === l.id) === i);
+    const ledgerKey = name => normalise(String(name || '').replace(/\((common|duty\/vat)\)/i, '')).replace(/\s+/g, ' ');
+
+    /* The ledger a cost row names: by its number in the ledger column, else by
+       the longest ledger name in the text. */
+    function ledgerFromText(text, isLedgerCell) {
+        const s = String(text || '');
+        if (isLedgerCell) {
+            const byId = LEDGER_LIST.find(l => new RegExp(`(^|\\D)${l.id}(\\D|$)`).test(s));
+            if (byId) return byId;
+        }
+        const hay = ' ' + ledgerKey(s) + ' ';
+        return LEDGER_LIST
+            .filter(l => ledgerKey(l.name) && hay.includes(' ' + ledgerKey(l.name) + ' '))
+            .sort((a, b) => b.name.length - a.name.length)[0] || null;
+    }
+
+    /* Is this creditor a shipping line? With the creditor column read on its
+       own, the short codes and hints count too (HAPAROT, MSC); in the whole
+       row they do not, or a trucker's "Transport HLBU 9066045" would be
+       Hapag-Lloyd. */
+    function carrierOf(text, isCreditorCell) {
+        const raw = String(text || '');
+        const words = ' ' + raw.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim() + ' ';
+        const norm = ' ' + normalise(raw).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+        const named = name => {
+            const n = normalise(name).replace(/[^a-z0-9]+/g, ' ').trim();
+            return n.length >= 4 && norm.includes(' ' + n + ' ');
+        };
+        for (const c of CARRIER_CREDITORS) {
+            if ((isCreditorCell && words.includes(' ' + c.code + ' ')) || named(c.name)) {
+                const known = CARRIERS.find(x => x.creditorSeq === c.seq);
+                return { seq: c.seq, name: known ? known.name : c.name };
+            }
+        }
+        for (const c of CARRIERS) {
+            const hints = isCreditorCell ? (c.creditorHints || []) : [];
+            if (named(c.name) || hints.some(h => words.includes(' ' + h.toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' '))) {
+                return { seq: c.creditorSeq || '', name: c.name };
+            }
+        }
+        return null;
+    }
+
+    /* The Costs region of a page, row by row: ledger, creditor, quantity,
+       price and amount where the headings say which column is which, the row
+       text where they do not. null while the region is not there or still
+       drawing; lines: [] when it says there are none. */
+    function readShipmentCosts(doc) {
+        doc = doc || document;
+        const region = [...doc.querySelectorAll('.t-Region')].find(r => {
+            const title = r.querySelector('.t-Region-title');
+            return title && /^(costs?|kosten)\b/i.test((title.textContent || '').trim());
+        });
+        if (!region) return null;
+        const regionText = (region.innerText || region.textContent || '').replace(/\s+/g, ' ');
+        const trs = [...region.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td'));
+        if (!trs.length && !/\bno data found\b|\bgeen gegevens\b/i.test(regionText)) return null;
+
+        const cellText = c => ((c && (c.innerText || c.textContent)) || '').replace(/\s+/g, ' ').trim();
+        // The headings of the table the rows are in; an Interactive Grid keeps
+        // them in a table of their own, so then every heading in the region.
+        // A th beside td cells is a row heading, not a column.
+        const isHead = th => !(th.parentElement && th.parentElement.querySelector('td'));
+        const own = trs.length ? [...trs[0].closest('table').querySelectorAll('th')].filter(isHead) : [];
+        const heads = own.length ? own : [...region.querySelectorAll('th')].filter(isHead);
+        const colOf = {};
+        heads.forEach((th, i) => {
+            const label = cellText(th);
+            const hit = COST_COLUMNS.find(([key, re]) => !(key in colOf) && re.test(label));
+            if (hit) colOf[hit[0]] = { index: i, id: th.id || '' };
+        });
+        const pick = (tds, key) => {
+            const col = colOf[key];
+            if (!col) return null;
+            const byHeader = col.id && tds.find(td => (td.getAttribute('headers') || '').split(/\s+/).includes(col.id));
+            if (byHeader) return cellText(byHeader);
+            return tds.length === heads.length && tds[col.index] ? cellText(tds[col.index]) : null;
+        };
+        const num = v => { const n = parseAmount(v); return isFinite(n) ? n : null; };
+
+        const lines = [];
+        trs.forEach(tr => {
+            const tds = [...tr.querySelectorAll('td')];
+            const text = cellText(tr);
+            const amounts = moneyIn(text);
+            if (!amounts.length || TOTAL_DESC.test(text)) return;
+
+            const ledgerCell = pick(tds, 'ledger');
+            const creditorCell = pick(tds, 'creditor');
+            const qty = num(pick(tds, 'qty'));
+            const price = num(pick(tds, 'price'));
+            let amount = num(pick(tds, 'amount'));
+            if (amount === null && qty !== null && price !== null) amount = round2(qty * price);
+            if (amount === null) amount = amounts.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0);
+            if (!amount) return;
+            const split = qty !== null && price !== null && qty !== 0 && Math.abs(qty * price - amount) < 0.01;
+
+            lines.push({
+                ledger: ledgerFromText(ledgerCell || text, ledgerCell !== null),
+                ledgerText: ledgerCell || '',
+                desc: pick(tds, 'desc') || '',
+                creditor: creditorCell || '',
+                carrier: carrierOf(creditorCell !== null ? creditorCell : text, creditorCell !== null),
+                qty: split ? round3(qty) : 1,
+                price: split ? round2(price) : round2(amount),
+                amount: round2(amount)
+            });
+        });
+
+        // "row(s) 1 - 15 of 22": the rest is on another page of the region
+        const count = /(\d+)\s*[-–]\s*(\d+)\s*of\s*(\d+)/i.exec(regionText);
+        const partial = !!count && parseInt(count[3], 10) > trs.length;
+        return { lines, partial, columns: Object.keys(colOf) };
+    }
+
+    function loadShipmentCosts() {
+        try {
+            const list = JSON.parse(localStorage.getItem(SHIPMENT_COSTS_KEY) || '[]');
+            return Array.isArray(list) ? list : [];
+        } catch (e) { return []; }
+    }
+
+    /* Called on every tick: keeps what the Costs region shows, per shipment.
+       Only written when it changed, since the tick runs every second. */
+    function captureShipmentCosts() {
+        const read = readShipmentCosts(document);
+        if (!read) return;
+        const ref = shipmentRef(document);
+        if (!ref.seqs.length && !ref.shipmentNo) return;
+        const sig = JSON.stringify([ref, read]);
+        if (sig === captureShipmentCosts.last) return;
+        captureShipmentCosts.last = sig;
+
+        const same = e => (ref.shipmentNo && e.shipmentNo === ref.shipmentNo)
+            || (e.seqs || []).some(s => ref.seqs.includes(s));
+        const list = loadShipmentCosts().filter(e => !same(e));
+        list.unshift(Object.assign({ at: Date.now() }, ref, read));
+        try { localStorage.setItem(SHIPMENT_COSTS_KEY, JSON.stringify(list.slice(0, SHIPMENT_COSTS_KEEP))); }
+        catch (e) { log('Shipment costs not saved: ' + e.message); }
+        log(`Costs read for ${ref.shipmentNo || ref.seqs.join('/')}`, { lines: read.lines.length, partial: read.partial });
+    }
+
+    /* The cost lines of the shipment this revenue form is for.
+       how: 'live'    - read just now from the shipment page under this form
+            'matched' - kept from the shipment page, same seq or number
+            'recent'  - the shipment opened last, within half an hour, where
+                        neither page says which shipment it is: offered, not ticked
+            'none'    - nothing known for this shipment */
+    function carrierCostsForRevenue() {
+        try {
+            if (window.parent && window.parent !== window) {
+                const read = readShipmentCosts(window.parent.document);
+                if (read) return Object.assign({ how: 'live', at: Date.now() }, shipmentRef(window.parent.document), read);
+            }
+        } catch (e) { /* another origin: fall through to what was kept */ }
+
+        const here = shipmentRef(document);
+        const list = loadShipmentCosts();
+        const sameNo = e => !!here.shipmentNo && e.shipmentNo === here.shipmentNo;
+        const sameSeq = e => (e.seqs || []).some(s => here.seqs.includes(s));
+        const match = list.find(e => sameNo(e) || sameSeq(e));
+        if (match) return Object.assign({ how: 'matched' }, match);
+
+        // Two pages that each name their shipment, differently, are two shipments.
+        const differs = e => (here.shipmentNo && e.shipmentNo && e.shipmentNo !== here.shipmentNo)
+            || (here.seqs.length && (e.seqs || []).length && !sameSeq(e));
+        const recent = list.find(e => Date.now() - (e.at || 0) < SHIPMENT_COSTS_GUESS_MS && !differs(e));
+        if (recent) return Object.assign({ how: 'recent' }, recent);
+        return { how: 'none', lines: null };
+    }
+
+    /* A carrier cost line as a revenue line: same ledger, same amount, and a
+       description in the client's language - the outlay row's wording where
+       one exists for that ledger, the ledger's own name otherwise. */
+    function carrierCostAsRevenue(line, nl) {
+        const ledger = line.ledger || LEDGER.extraCosts;
+        const outlay = OUTLAY_ITEMS.find(oi => oi.ledger.id === ledger.id && oi.key !== 'extraSurcharges' && oi.key !== 'customsCharges');
+        const desc = outlay ? (nl ? outlay.nl : outlay.en)
+            : line.ledger ? ledger.name.replace(/\s*\((common|duty\/vat)\)\s*$/i, '').replace(/\s{2,}/g, ' ').trim()
+            : (line.desc || (nl ? 'Extra toeslagen rederij' : 'Extra carrier surcharges'));
+        return { ledgerId: ledger.id, ledgerName: ledger.name, desc, qty: line.qty || 1, price: line.price,
+                 carrier: line.carrier ? line.carrier.name : '', guessedLedger: !line.ledger };
+    }
+
     /* Why a line was skipped or did not go through, recorded as a code beside
        the Dutch sentence. The sentence is what the panel and the Dutch report
        show; the code is what the English report builds its own sentence from,
@@ -3429,8 +3767,10 @@
        overrides and extends this set - so a new creditor never needs a new
        version of the extension.
        ========================================================================= */
-    const BUILTIN_CREDITORS = [
-        // carriers
+    /* The shipping lines on their own: a cost line from one of these is a
+       carrier charge, passed on to the client net net (see CARRIER COSTS INTO
+       REVENUE). */
+    const CARRIER_CREDITORS = [
         { seq: '66205', code: 'HAPAROT', name: 'Hapag-Lloyd Rotterdam' },
         { seq: '66208', code: 'MEDIROT', name: 'Mediterranean Shipping Company (Nederland) BV' },
         { seq: '66204', code: 'MAERCOP', name: 'Maersk A/S' },
@@ -3452,7 +3792,11 @@
         { seq: '81990', code: 'SAMSWAA', name: 'Samskip Multimodal B.V.' },
         { seq: '69697', code: 'MACSROT', name: 'MACS Benelux BV' },
         { seq: '71650', code: 'NIRIBAR', name: 'Nirint Shipping B.V.' },
-        { seq: '70302', code: 'GEESRHO', name: 'Geest Line Benelux' },
+        { seq: '70302', code: 'GEESRHO', name: 'Geest Line Benelux' }
+    ];
+
+    const BUILTIN_CREDITORS = [
+        ...CARRIER_CREDITORS,
 
         // coldstores, terminals and handling
         { seq: '71587', code: 'LINEMAA', name: 'Lineage Rotterdam Maasvlakte B.V.' },
@@ -8244,6 +8588,7 @@
                     '  fiton.ledger("Tol")   welk grootboek een omschrijving krijgt',
                     '  fiton.state()         lopende boekrun en werklijst',
                     '  fiton.timing()        hoe lang elke regel duurde in de laatste run',
+                    '  fiton.costs()         rederijkosten die het omzetformulier overneemt',
                     '  fiton.diagnose()      waarom een PDF niet gelezen werd'
                 ].join('\n'));
                 return r;
@@ -8485,6 +8830,28 @@
                 return r;
             },
 
+            /* Wat de Costs-regio per zending liet zien, en wat het omzetformulier
+               hier als rederijkosten zou overnemen. */
+            costs: () => {
+                const r = out();
+                const src = carrierCostsForRevenue();
+                r.logs.push(`hier      : ${JSON.stringify(shipmentRef(document))}`);
+                r.logs.push(`overnemen : ${src.how}${src.shipmentNo ? ' — zending ' + src.shipmentNo : ''}${src.partial ? ' (niet alle regels in beeld)' : ''}`);
+                if (src.columns) r.logs.push(`kolommen  : ${src.columns.join(', ') || 'geen herkend, gelezen uit de regeltekst'}`);
+                if ((src.lines || []).length) r.tables.push({ title: 'kostenregels van die zending', rows: src.lines.map(l => ({
+                    grootboek: l.ledger ? l.ledger.id : '?', crediteur: l.creditor || '-', rederij: l.carrier ? l.carrier.name : '',
+                    omschrijving: l.desc, aantal: l.qty, prijs: l.price, bedrag: l.amount
+                })) });
+                const kept = loadShipmentCosts();
+                r.tables.push({ title: 'bewaard per zending', rows: kept.map(e => ({
+                    zending: e.shipmentNo || '-', seq: (e.seqs || []).join(','), regels: (e.lines || []).length,
+                    rederij: (e.lines || []).filter(l => l.carrier).length,
+                    gelezen: new Date(e.at).toLocaleString('nl-NL')
+                })) });
+                r.value = src;
+                return r;
+            },
+
             timing: () => {
                 const r = out();
                 let last = null;
@@ -8555,6 +8922,7 @@
     function tick() {
         const onRevenue = isEntryPage();
         const queueData = localStorage.getItem('fiton_automation_queue');
+        try { captureShipmentCosts(); } catch (e) { log('Reading the Costs region failed: ' + e.message); }
 
         if (onRevenue) {
             createUI();
