@@ -1,5 +1,30 @@
 # Wat er veranderd is
 
+## 9.31.0
+
+**Template voor J.A. Ter Maten B.V.** Volgens de offerte van 26-01-2026,
+import veterinair CAT-3:
+
+- Vast op elke zending: import directe vertegenwoordiging € 45,00 (incl. 2 HS
+  codes), stop checkpoint € 62,50 per container, handling fee € 25,00 per B/L
+  (incl. 3 containers).
+- Per gezondheidscertificaat (het veld GGB / CHED entries): GGB aanvraag
+  € 25,00 en VET check € 125,00.
+- Optioneel, met aantal: geleidedocument € 25,00 per container / stop (staat
+  standaard op 1), GGB extra container / artikel € 5,00, extra HS code € 5,50,
+  handling fee extra container boven 3 per B/L € 7,50.
+- Transport: uithalen terminal RTM – checkpoint – Ter Maten Bunschoten-Spakenburg
+  – leeg retour, € 490,00 per container. Dieseltoeslag 13% (januari 2026).
+  Wachturen € 62,50 per uur.
+- NVWA per kg, min € 82,62 en max € 633,42.
+- THC, ISPS, delivery order en terminaltoeslagen gaan net net: de
+  rederijkosten worden uit de inkoop overgenomen, de rest bij net net per outlay.
+
+De offerte noemt geen kopie-CHED, geen toeslag na 17:00 en geen Gen-Set. Die
+velden staan daarom niet in het venster van Ter Maten. Een klant zonder die
+tarieven kan nu zo worden ingesteld. Een optie kan voortaan ook standaard op een
+aantal staan, als er geen preset is die iets anders zegt.
+
 ## 9.30.1
 
 **Maasvlakte-toeslag telde niet mee in de diesel van zijn rit.** Sinds 9.30.0
