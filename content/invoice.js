@@ -1544,6 +1544,7 @@
             background: var(--fip-accent-soft); color: var(--fip-accent); padding: 1px 6px; border-radius: 4px;
         }
         .fip-checklist { display: flex; flex-direction: column; gap: 1px; }
+        .fip-root .fip-check input.fip-opt-qty { flex: none; width: 58px; padding: 4px 6px; font-size: 12px; text-align: right; }
         .fip-scroll { max-height: 210px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
 
         .fip-toolbar { display: flex; gap: 8px; margin-bottom: 9px; }
@@ -1629,6 +1630,14 @@
         return { amount: round2(base * Math.max(0, pct - (alreadyIncluded || 0))) };
     }
 
+    /* An option is ticked with a count; presets from before 9.30 hold true. */
+    const optionCount = (options, key) => {
+        const v = options && options[key];
+        return v === true ? 1 : Math.max(0, Math.round(Number(v) || 0));
+    };
+    // A ride's own diesel percentage, or the standard one when left empty.
+    const routeDiesel = (dest, o) => String((dest && dest.diesel) || '').trim() || o.dieselInput;
+
     function buildItemsList(templateType, o) {
         const cfg = CLIENTS[templateType];
         const nl = cfg.lang === 'nl';
@@ -1674,11 +1683,14 @@
             if (o.procStatements > 0) push(LEDGER.docs, cfg.catchCerts.procDesc, o.procStatements, 25.00, G.docs);
         }
 
-        // 6. Optional charges, driven by each client's own options list
+        // 6. Optional charges, driven by each client's own options list. Each
+        //    one has a count: a T1 terminal -> keurpunt -> Rhenus -> bestemming
+        //    is two T1 documents after the first, not one.
         let optionalFuelBase = 0;
         (cfg.options || []).forEach(opt => {
-            if (!o.options || !o.options[opt.key]) return;
-            const qty = opt.perCtr ? ctr : 1.000;
+            const count = optionCount(o.options, opt.key);
+            if (!count) return;
+            const qty = count * (opt.perCtr ? ctr : 1.000);
             const group = opt.ledger === LEDGER.noShow ? G.check
                         : (opt.ledger === LEDGER.transit || opt.ledger === LEDGER.docs) ? G.docs
                         : G.surch;
@@ -1693,14 +1705,24 @@
         // 8. Optional minimum inspection fee
         if (o.includeMinKg) push(LEDGER.nvwa, nl ? 'Minimum KG Keurloon' : 'Minimum KG inspection fee', o.minKgQty, NVWA.min, G.check);
 
-        // 9. Trucking per destination + toll/maut
-        let fuelBase = (cfg.fixedFuelBase * ctr) + optionalFuelBase;
+        // 9. Trucking per destination + toll/maut. Every ride carries its own
+        //    diesel percentage; rides on the same percentage share one line.
+        const fuelGroups = new Map();
+        const addFuel = (input, base, route) => {
+            const key = String(input || '').replace(/\s+/g, '').toLowerCase();
+            if (!fuelGroups.has(key)) fuelGroups.set(key, { input: String(input || '').trim(), base: 0, routes: [] });
+            const g = fuelGroups.get(key);
+            g.base += base;
+            if (route) g.routes.push(route);
+        };
+        const fixedFuelBase = (cfg.fixedFuelBase * ctr) + optionalFuelBase;
+        if (fixedFuelBase > 0) addFuel(o.dieselInput, fixedFuelBase, null);
         const destTable = DESTINATIONS[templateType] || [];
         (o.destChoices || []).forEach(dest => {
             const d = destTable.find(x => x.id === dest.id);
             if (!d) { log('Unknown destination id, skipped', dest); return; }
             push(LEDGER.trucking, d.desc, ctr, d.price, G.transport);
-            if (!d.fuelIncluded) fuelBase += d.price * ctr;
+            if (!d.fuelIncluded) addFuel(routeDiesel(dest, o), d.price * ctr, d.label);
             if (dest.maut > 0) push(LEDGER.toll, `Maut (DE) Rotterdam -> ${d.label}`, 1.000, dest.maut, G.transport);
             if (dest.toll > 0) push(LEDGER.toll, `Toll (NL) Rotterdam -> ${d.label}`, 1.000, dest.toll, G.transport);
         });
@@ -1766,14 +1788,19 @@
         // 16. Tantieme (credit)
         if (o.tantiemeClient) push(LEDGER.misc, `Tantieme directe levering aan: ${o.tantiemeClient}`, 1.000, -50.00, G.other);
 
-        // 17. Fuel surcharge over the trucking base (excl. rates that already include fuel)
-        const diesel = parseDieselSurcharge(o.dieselInput, fuelBase, cfg.dieselIncluded);
-        if (diesel.amount > 0) {
-            const desc = cfg.dieselIncluded > 0
-                ? `DIESELTOESLAG ${o.dieselInput} (incl. ${Math.round(cfg.dieselIncluded * 100)}% in transportprijs, resterend extra)`
-                : (nl ? `${o.dieselInput} brandstoftoeslag` : `${o.dieselInput} fuel surcharge`);
+        // 17. Fuel surcharge over the trucking base (excl. rates that already include fuel),
+        //     one line per percentage; the rides are named only when there are several
+        if (!fuelGroups.size) addFuel(o.dieselInput, 0, null);   // a fixed amount needs no base
+        const fuelLines = [...fuelGroups.values()];
+        fuelLines.forEach(g => {
+            const diesel = parseDieselSurcharge(g.input, g.base, cfg.dieselIncluded);
+            if (diesel.amount <= 0) return;
+            let desc = cfg.dieselIncluded > 0
+                ? `DIESELTOESLAG ${g.input} (incl. ${Math.round(cfg.dieselIncluded * 100)}% in transportprijs, resterend extra)`
+                : (nl ? `${g.input} brandstoftoeslag` : `${g.input} fuel surcharge`);
+            if (fuelLines.length > 1 && g.routes.length) desc += ` - ${g.routes.join(', ')}`;
             push(LEDGER.fuel, desc, 1.000, diesel.amount, G.transport);
-        }
+        });
 
         // 18. Waiting hours
         if (o.waitingHours > 0) push(LEDGER.waiting, cfg.waiting.desc, o.waitingHours, cfg.waiting.price, G.other);
@@ -1814,11 +1841,12 @@
         if (o.copyChedQty > o.ggbEntries && o.ggbEntries > 0) warnings.push('Meer kopie-CHED regels dan GGB entries.');
         if (o.nettKg === 0) warnings.push('Netto gewicht is 0 — er wordt geen NVWA keurloon geboekt.');
         if (o.nettKg > NVWA.maxKg) warnings.push(`Netto gewicht boven ${NVWA.maxKg} kg — NVWA is afgetopt op ${money(NVWA.max)}.`);
-        if (!o.dieselInput) warnings.push('Geen dieseltoeslag ingevuld.');
-        if (cfg.dieselIncluded > 0 && o.dieselInput && String(o.dieselInput).endsWith('%')) {
-            const pct = parseFloat(o.dieselInput);
-            if (pct <= cfg.dieselIncluded * 100) warnings.push(`Dieseltoeslag ${o.dieselInput} ligt op of onder de ${Math.round(cfg.dieselIncluded * 100)}% die al in het tarief zit — er wordt niets extra doorbelast.`);
-        }
+        const dieselInputs = [...new Set([o.dieselInput, ...(o.destChoices || []).map(d => routeDiesel(d, o))]
+            .map(v => String(v || '').trim()).filter(Boolean))];
+        if (!dieselInputs.length) warnings.push('Geen dieseltoeslag ingevuld.');
+        if (cfg.dieselIncluded > 0) dieselInputs.filter(v => v.endsWith('%')).forEach(v => {
+            if (parseFloat(v) <= cfg.dieselIncluded * 100) warnings.push(`Dieseltoeslag ${v} ligt op of onder de ${Math.round(cfg.dieselIncluded * 100)}% die al in het tarief zit — er wordt niets extra doorbelast.`);
+        });
         const outlayLines = items.filter(i => i.isOutlay && !i.fromCost);
         if (outlayLines.length) {
             warnings.push(`${outlayLines.length} regel(s) net net per outlay — controleer de bedragen tegen de leveranciersfactuur.`);
@@ -2017,12 +2045,16 @@
             <div class="fip-card">
                 <div class="fip-card-title">${t('Optionele documenten en toeslagen', 'Optional documents &amp; surcharges')}</div>
                 <div class="fip-checklist">
-                    ${cfg.options.map(opt => `
+                    ${cfg.options.map(opt => {
+                        const n = optionCount(pv('options', {}), opt.key);
+                        return `
                     <label class="fip-check">
-                        <input type="checkbox" class="fip-opt" data-key="${opt.key}" ${(pv('options', {})[opt.key]) ? 'checked' : ''}>
+                        <input type="checkbox" class="fip-opt" data-key="${opt.key}" ${n ? 'checked' : ''}>
                         <span>${esc(opt.desc)}</span>
-                        <span class="fip-price">${money(opt.price)}</span>
-                    </label>`).join('')}
+                        <span class="fip-price">${money(opt.price)}${opt.perCtr ? ' ' + t('per ctr', 'per ctr') : ''}</span>
+                        <input type="number" class="fip-opt-qty" data-key="${opt.key}" min="0" step="1" value="${n || ''}" placeholder="0" title="${t('Aantal', 'Quantity')}">
+                    </label>`;
+                    }).join('')}
                 </div>
             </div>` : '';
 
@@ -2062,7 +2094,7 @@
                 </div>
 
                 <div class="fip-card">
-                    <div class="fip-card-title">${t('Toll &amp; Maut per zending', 'Toll &amp; Maut per shipment')}</div>
+                    <div class="fip-card-title">${t('Toll, Maut &amp; diesel per rit', 'Toll, Maut &amp; diesel per ride')}</div>
                     <div id="per-shipment-toll-container"></div>
                 </div>
 
@@ -2181,9 +2213,9 @@
                             <div class="fip-hint">${money(cfg.waiting.price)} ${t('per uur', 'per hour')}</div>
                         </div>
                         <div class="fip-field">
-                            <label>${t('Dieseltoeslag', 'Diesel surcharge')}</label>
+                            <label>${t('Dieseltoeslag (standaard)', 'Diesel surcharge (default)')}</label>
                             <input type="text" id="modal-diesel" value="${esc(pv('dieselInput', cfg.dieselDefault))}">
-                            <div class="fip-hint">${cfg.dieselIncluded > 0
+                            <div class="fip-hint">${t('Per rit aan te passen bij Toll, Maut &amp; diesel. ', 'Can be changed per ride under Toll, Maut &amp; diesel. ')}${cfg.dieselIncluded > 0
                                 ? `${Math.round(cfg.dieselIncluded * 100)}% ${t('zit al in het tarief; alleen het meerdere wordt doorbelast', 'is already in the rate; only the excess is charged')}`
                                 : t('percentage (21%) of vast bedrag (€45)', 'percentage (21%) or fixed amount (€45)')}</div>
                         </div>
@@ -2230,12 +2262,16 @@
                     id: row.getAttribute('data-val'),
                     name: row.getAttribute('data-name'),
                     maut: parseFloat(row.querySelector('.route-maut').value) || 0,
-                    toll: parseFloat(row.querySelector('.route-toll').value) || 0
+                    toll: parseFloat(row.querySelector('.route-toll').value) || 0,
+                    diesel: (row.querySelector('.route-diesel').value || '').trim()
                 });
             });
             const selectedOptions = {};
             document.querySelectorAll('.fip-opt').forEach(cb => {
-                if (cb.checked) selectedOptions[cb.getAttribute('data-key')] = true;
+                if (!cb.checked) return;
+                const key = cb.getAttribute('data-key');
+                const qty = document.querySelector(`.fip-opt-qty[data-key="${key}"]`);
+                selectedOptions[key] = Math.max(1, Math.round(parseFloat(qty && qty.value) || 1));
             });
 
             const extras = {};
@@ -2327,17 +2363,19 @@
             document.querySelectorAll('.fip-route').forEach(r => {
                 existing[r.getAttribute('data-val')] = {
                     maut: r.querySelector('.route-maut').value,
-                    toll: r.querySelector('.route-toll').value
+                    toll: r.querySelector('.route-toll').value,
+                    diesel: r.querySelector('.route-diesel').value
                 };
             });
             container.innerHTML = checked.map((cb, i) => {
                 const id = cb.value, name = cb.getAttribute('data-name');
-                const prev = existing[id] || { maut: '0.00', toll: '0.00' };
+                const prev = existing[id] || { maut: '0.00', toll: '0.00', diesel: '' };
                 return `
                 <div class="fip-route" data-val="${id}" data-name="${esc(name)}">
                     <div class="fip-route-name" title="${esc(name)}">${i + 1}. ${esc(name)}</div>
                     <div class="fip-route-fld"><label>Maut (DE) ${CURRENCY_SYMBOL}</label><input type="number" class="route-maut" step="0.01" min="0" value="${prev.maut}"></div>
                     <div class="fip-route-fld"><label>Tol (NL) ${CURRENCY_SYMBOL}</label><input type="number" class="route-toll" step="0.01" min="0" value="${prev.toll}"></div>
+                    <div class="fip-route-fld"><label>${t('Diesel', 'Diesel')}</label><input type="text" class="route-diesel" value="${esc(prev.diesel)}" placeholder="${esc(($('modal-diesel') || {}).value || '')}" title="${t('Leeg = standaard dieseltoeslag', 'Empty = default diesel surcharge')}"></div>
                 </div>`;
             }).join('');
             container.querySelectorAll('input').forEach(inp => inp.addEventListener('input', refreshTotals));
@@ -2351,8 +2389,24 @@
                 });
                 return;
             }
+            if (e.target.classList.contains('fip-opt-qty')) {
+                const cb = document.querySelector(`.fip-opt[data-key="${e.target.getAttribute('data-key')}"]`);
+                if (cb) cb.checked = (parseFloat(e.target.value) || 0) > 0;
+            }
+            if (e.target.id === 'modal-diesel') {
+                document.querySelectorAll('.route-diesel').forEach(inp => { inp.placeholder = e.target.value; });
+            }
             if (!e.target.closest('.fip-route')) refreshTotals();
         });
+        // Ticked means at least one; unticked means none.
+        function syncOptionCount(cb) {
+            const qty = document.querySelector(`.fip-opt-qty[data-key="${cb.getAttribute('data-key')}"]`);
+            if (!qty) return;
+            const n = parseFloat(qty.value) || 0;
+            if (cb.checked && n < 1) qty.value = 1;
+            if (!cb.checked) qty.value = '';
+        }
+
         // Some destinations are quoted excluding surcharges - tick what they need.
         function applyRequiredOptions() {
             const table = DESTINATIONS[templateType] || [];
@@ -2361,12 +2415,13 @@
                 if (!d || !d.requires) return;
                 d.requires.forEach(key => {
                     const opt = document.querySelector(`.fip-opt[data-key="${key}"]`);
-                    if (opt && !opt.checked) opt.checked = true;
+                    if (opt && !opt.checked) { opt.checked = true; syncOptionCount(opt); }
                 });
             });
         }
 
         overlay.addEventListener('change', e => {
+            if (e.target.classList.contains('fip-opt')) syncOptionCount(e.target);
             if (e.target.name === 'modal-dest') { applyRequiredOptions(); rebuildRoutes(); }
             if (e.target.id === 'modal-min-kg-keurloon') {
                 $('modal-min-kg-container').style.display = e.target.checked ? 'block' : 'none';
@@ -2411,7 +2466,10 @@
                 .forEach(([id, key]) => { const el = $(id); if (el) el.checked = !!opts[key]; });
 
             document.querySelectorAll('.fip-opt').forEach(cb => {
-                cb.checked = !!(opts.options && opts.options[cb.getAttribute('data-key')]);
+                const n = optionCount(opts.options, cb.getAttribute('data-key'));
+                cb.checked = n > 0;
+                const qty = document.querySelector(`.fip-opt-qty[data-key="${cb.getAttribute('data-key')}"]`);
+                if (qty) qty.value = n || '';
             });
             document.querySelectorAll('.fip-extra').forEach(inp => {
                 inp.value = (opts.extras && opts.extras[inp.getAttribute('data-key')]) || '';
