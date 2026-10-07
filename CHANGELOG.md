@@ -1,5 +1,25 @@
 # Wat er veranderd is
 
+## 9.30.0
+
+**Een aantal bij elk optioneel document.** De optionele documenten en
+toeslagen waren een vinkje, dus altijd één stuk. Een rit terminal → keurpunt →
+Rhenus → Nijkerk heeft drie T-documenten, en dat was niet in te voeren. Naast
+elk vinkje staat nu een aantal: aanvinken zet het op 1, een aantal typen vinkt
+het aan, 0 zet het uit. *T1 van keurpunt naar bestemming* × 2 wordt één regel
+met aantal 2. Opgeslagen presets werken gewoon door, als aantal 1.
+
+**Dieseltoeslag per rit.** Er was één dieseltoeslag voor alle ritten samen,
+terwijl de ene rit op 43% kan staan en de andere op 44%. Bij *Toll, Maut &
+diesel per rit* heeft elke rit nu een eigen dieselveld. Leeg betekent de
+standaardtoeslag, die als grijze tekst in het veld staat. Ritten met hetzelfde
+percentage delen één dieselregel, net als eerst. Bij verschillende percentages
+komt er een regel per percentage, met de ritten erachter: *DIESELTOESLAG 43%
+(…) - Via keurpunt naar Rhenus* € 105,00 en *DIESELTOESLAG 44% (…) -
+Barneveld/Nijkerk/Woudenberg/Hansweert* € 186,18. De controle op een
+percentage dat onder wat al in het tarief zit ligt, kijkt nu naar elk
+percentage.
+
 ## 9.29.0
 
 **Rederijkosten gaan vanzelf mee naar de omzet.** Wat een rederij in rekening
