@@ -424,6 +424,7 @@
         fiscalRep:        { id: "5136", name: "Import Fiscal Representation (Common)" },
         t2l:              { id: "4957", name: "T2L(F) (Common)" },
         exportDoc:        { id: "4941", name: "Export Document (Common)" },
+        extraHsCodes:     { id: "5119", name: "Extra HS Codes (Common)" },
         tolheffing:       { id: "5916", name: "Tolheffing (Common)" }
     };
 
@@ -817,6 +818,43 @@
                 { ledger: LEDGER.importDoc, desc: 'Import customs clearance under direct representation',        qty: 1.000, price: 104.00 },
                 { ledger: LEDGER.handling,  desc: 'Handling fee',                                                qty: 1.000, price: 52.00, perCtr: true }
             ]
+        },
+
+        /* Offerte 26-01-2026, import veterinair CAT-3. Geen kopie-CHED, geen
+           toeslag na 17:00 en geen Gen-Set in deze offerte, dus die velden
+           staan niet in het venster. THC, ISPS, delivery order en de
+           terminaltoeslagen gaan net net, as per carrier outlay. */
+        termaten: {
+            name: 'J.A. Ter Maten B.V.',
+            subtitle: 'Bunschoten-Spakenburg, Nederland · import veterinair CAT-3 · offerte 26-01-2026 · betaling 30 dagen',
+            lang: 'nl',
+            ggb:             { price: 25.00, desc: 'GGB aanvraag per gezondheidscertificaat (incl. 2 artikelen)' },
+            inspectionPoint: { price: 125.00, desc: 'VET check kosten per gezondheidscertificaat' },
+            copyChed:   null,
+            afterHours: null,
+            catchCerts: false,
+            genset:  null,
+            plugin:  null,
+            chassis: null,
+            waiting: { price: 62.50, desc: 'Wachturen keuring en lossen (1 uur vrij keuring, 2 uur vrij lossen)' },
+            dieselDefault: '13%',   // januari 2026
+            dieselIncluded: 0,
+            fixedFuelBase: 0,
+            nvwaPerKgLine: true,
+            nvwaDesc: kg => `NVWA keurloon, netto gewicht: ${kg} kg`,
+            options: [
+                { key: 'geleidedoc',    ledger: LEDGER.docs,         desc: 'Geleidedocument per container / stop', price: 25.00, perCtr: true, defaultQty: 1 },
+                { key: 'ggbextra',      ledger: LEDGER.ggb,          desc: 'GGB extra container / artikel', price: 5.00 },
+                { key: 'extrahs',       ledger: LEDGER.extraHsCodes, desc: 'Extra HS code (boven 2 per aangifte)', price: 5.50 },
+                { key: 'handlingextra', ledger: LEDGER.handling,     desc: 'Handling fee extra container (boven 3 per B/L)', price: 7.50 }
+            ],
+            debtorHints: ['Ter Maten', 'TERMATEN', 'TER MATEN'],
+            extras: [],
+            base: [
+                { ledger: LEDGER.importDoc, desc: 'Import directe vertegenwoordiging (incl. 2 HS codes)', qty: 1.000, price: 45.00 },
+                { ledger: LEDGER.extraStop, desc: 'Stop checkpoint',                                      qty: 1.000, price: 62.50, perCtr: true },
+                { ledger: LEDGER.handling,  desc: 'Handling fee per B/L (incl. 3 containers)',            qty: 1.000, price: 25.00 }
+            ]
         }
     };
 
@@ -877,6 +915,10 @@
             { id: 'A_4', price: 764.00, label: 'Koln (D-50996)',              desc: 'Terminal Rotterdam - Koln (D-50996) 2 Hrs free of unloading.', foreign: true },
             { id: 'A_5', price: 820.00, label: 'Troisdorf (D-53842)',         desc: 'Terminal Rotterdam – Troisdorf (D-53842) 2 Hrs free of unloading.', foreign: true },
             { id: 'A_6', price: 702.00, label: 'Herne (D-44653)',             desc: 'Terminal Rotterdam – Herne (D-44653) 2 Hrs free of unloading.', foreign: true, checked: true }
+        ],
+        termaten: [
+            { id: 'TM_1', price: 490.00, label: 'RTM – Checkpoint – Ter Maten Bunschoten-Spakenburg',
+              desc: 'Uithalen Terminal RTM – Checkpoint – Ter Maten Bunschoten-Spakenburg – leeg retour Terminal RTM', checked: true }
         ],
         dutchseafood: [
             { id: 'DS_1', price: 430.00,  label: 'Coldstore Rotterdam All-in',        desc: 'Terminal Rotterdam – Coldstore Rotterdam All-in.', checked: true },
@@ -1672,10 +1714,10 @@
         }
 
         // 3. Copies of the CHED / CVED
-        if (o.copyChedQty > 0) push(LEDGER.docs, cfg.copyChed.desc, o.copyChedQty, cfg.copyChed.price, G.docs);
+        if (cfg.copyChed && o.copyChedQty > 0) push(LEDGER.docs, cfg.copyChed.desc, o.copyChedQty, cfg.copyChed.price, G.docs);
 
         // 4. After-hours inspection surcharge
-        if (o.includeAfterHours) push(LEDGER.vet, cfg.afterHours.desc, 1.000, cfg.afterHours.price, G.check);
+        if (cfg.afterHours && o.includeAfterHours) push(LEDGER.vet, cfg.afterHours.desc, 1.000, cfg.afterHours.price, G.check);
 
         // 5. Catch certificates / processing statements
         if (cfg.catchCerts) {
@@ -1691,8 +1733,9 @@
             const count = optionCount(o.options, opt.key);
             if (!count) return;
             const qty = count * (opt.perCtr ? ctr : 1.000);
-            const group = opt.ledger === LEDGER.noShow ? G.check
-                        : (opt.ledger === LEDGER.transit || opt.ledger === LEDGER.docs) ? G.docs
+            const group = (opt.ledger === LEDGER.noShow || opt.ledger === LEDGER.ggb) ? G.check
+                        : [LEDGER.transit, LEDGER.docs, LEDGER.importDoc, LEDGER.extraHsCodes].includes(opt.ledger) ? G.docs
+                        : opt.ledger === LEDGER.handling ? G.base
                         : G.surch;
             push(opt.ledger, opt.desc, qty, opt.price, group);
             if (opt.fuelBase) optionalFuel.push({ key: opt.key, amount: opt.price * qty });   // terminal surcharge counts towards fuel
@@ -1788,7 +1831,7 @@
         }
 
         // 13. Gen-Set (per container, separate from any plug-in charge)
-        if (o.includeGenset) push(cfg.genset.ledger || LEDGER.misc, cfg.genset.desc, ctr, cfg.genset.price, G.surch);
+        if (cfg.genset && o.includeGenset) push(cfg.genset.ledger || LEDGER.misc, cfg.genset.desc, ctr, cfg.genset.price, G.surch);
 
         // 14. Plug-in charges per calendar day
         if (cfg.plugin && o.pluginDays > 0) push(LEDGER.misc, cfg.plugin.desc, o.pluginDays, cfg.plugin.price, G.other);
@@ -2057,7 +2100,7 @@
                 <div class="fip-card-title">${t('Optionele documenten en toeslagen', 'Optional documents &amp; surcharges')}</div>
                 <div class="fip-checklist">
                     ${cfg.options.map(opt => {
-                        const n = optionCount(pv('options', {}), opt.key);
+                        const n = preset.options ? optionCount(preset.options, opt.key) : (opt.defaultQty || 0);
                         return `
                     <label class="fip-check">
                         <input type="checkbox" class="fip-opt" data-key="${opt.key}" ${n ? 'checked' : ''}>
@@ -2117,11 +2160,12 @@
                             <input type="number" id="modal-ggb-entries" min="0" step="1" value="${pv('ggbEntries', 1)}">
                             <div class="fip-hint">${money(cfg.ggb.price)} + ${money(cfg.inspectionPoint.price)} ${t('keurpunt', 'inspection point')}</div>
                         </div>
+                        ${cfg.copyChed ? `
                         <div class="fip-field">
                             <label>${esc(cfg.copyChed.desc)}</label>
                             <input type="number" id="modal-copy-ched" min="0" step="1" value="${pv('copyChedQty', cfg.copyChed.defaultQty)}">
                             <div class="fip-hint">${money(cfg.copyChed.price)} ${t('per stuk', 'each')}</div>
-                        </div>
+                        </div>` : ''}
                         ${cfg.catchCerts ? `
                         <div class="fip-field">
                             <label>${t('Vangstcertificaten', 'Catch certificates')}</label>
@@ -2184,10 +2228,10 @@
                 <div class="fip-card">
                     <div class="fip-card-title">${t('Toeslagen', 'Surcharges')}</div>
                     <div class="fip-checklist">
-                        <label class="fip-check"><input type="checkbox" id="modal-genset" ${ck('includeGenset', cfg.genset.defaultChecked)}><span>${esc(cfg.genset.desc)}</span><span class="fip-price">${money(cfg.genset.price)}</span></label>
+                        ${cfg.genset ? `<label class="fip-check"><input type="checkbox" id="modal-genset" ${ck('includeGenset', cfg.genset.defaultChecked)}><span>${esc(cfg.genset.desc)}</span><span class="fip-price">${money(cfg.genset.price)}</span></label>` : ''}
                         <label class="fip-check"><input type="checkbox" id="modal-ect" ${ck('includeEct', templateType === 'kuhneheitz')}><span>ECT (Terminal) peak surcharge</span><span class="fip-price">${money(ECT_SURCHARGE)}</span></label>
                         <label class="fip-check"><input type="checkbox" id="modal-rwg" ${ck('includeRwg', templateType === 'vbfood' || templateType === 'kuhneheitz')}><span>RWG (Terminal) peak surcharge</span><span class="fip-price">${money(RWG_SURCHARGE)}</span></label>
-                        <label class="fip-check"><input type="checkbox" id="modal-afterhours" ${ck('includeAfterHours', false)}><span>${esc(cfg.afterHours.desc)}</span><span class="fip-price">${money(cfg.afterHours.price)}</span></label>
+                        ${cfg.afterHours ? `<label class="fip-check"><input type="checkbox" id="modal-afterhours" ${ck('includeAfterHours', false)}><span>${esc(cfg.afterHours.desc)}</span><span class="fip-price">${money(cfg.afterHours.price)}</span></label>` : ''}
                         <label class="fip-check"><input type="checkbox" id="modal-min-kg-keurloon" ${ck('includeMinKg', false)}><span>${t('Minimum KG keurloon', 'Minimum KG inspection fee')}</span><span class="fip-price">${money(NVWA.min)}</span></label>
                     </div>
                     <div id="modal-min-kg-container" style="display:none; margin-top:8px; max-width:180px;">
