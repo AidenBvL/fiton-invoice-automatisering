@@ -1,5 +1,33 @@
 # Wat er veranderd is
 
+## 9.29.0
+
+**Rederijkosten gaan vanzelf mee naar de omzet.** Wat een rederij in rekening
+brengt — THC, admin fee, security, container protect — wordt net net
+doorbelast, en stond dus al als kostenregel op de zending voordat iemand de
+omzet boekte. Toch moest elk bedrag in het omzetformulier opnieuw worden
+ingetypt. Nu leest de extensie de Costs-regio van de zending zodra die in beeld
+is, en onthoudt ze per zending. Wie daarna via Create bij Revenues het
+omzetformulier opent en op **Start template** drukt, ziet onder *Net net per
+outlay* een blok **Rederijkosten uit de inkoop**: elke kostenregel van een
+rederij, aangevinkt, op zijn eigen grootboek (4959 THC, 4983 admin fee, …) en
+tegen het bedrag van de inkoop. Omschrijving en bedrag zijn aan te passen, en
+wat niet doorbelast moet worden vink je uit.
+
+Alleen regels van een rederij gaan mee: transport, coldstore en de andere
+kosten hebben een tarief in de offerte en worden niet overgenomen — het blok
+zegt hoeveel van zulke regels er op de zending stonden. Een regel waarvan het
+grootboek niet herkend is, staat op *Extra Costs* met een vraagteken.
+
+De kosten horen altijd bij de zending van het formulier: herkend aan het
+bookingnummer of het zendingnummer. Zegt het formulier niet bij welke zending
+het hoort, dan staan de kosten van de laatst geopende zending er met een
+waarschuwing, en uitgevinkt. Toonde de Costs-regio niet alle regels, dan
+staat dat erbij. Staat dezelfde kostensoort ook nog met de hand bij net net,
+dan waarschuwt het controlescherm dat hij dubbel doorbelast wordt. Presets
+bewaren deze regels nooit: ze horen bij één zending. `fiton.costs()` laat zien
+wat er per zending gelezen is.
+
 ## 9.28.0
 
 **Eén factuur voor twee containers: de kosten worden verdeeld.** Maersk zet
