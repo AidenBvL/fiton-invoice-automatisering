@@ -1,5 +1,18 @@
 # Wat er veranderd is
 
+## 9.30.1
+
+**Maasvlakte-toeslag telde niet mee in de diesel van zijn rit.** Sinds 9.30.0
+heeft elke rit een eigen dieselpercentage, maar de toeslag Maasvlakte
+Terminals (en een vaste Maasvlakte-toeslag in het template) bleef op het
+standaardpercentage staan. VB Food, Rhenus → FLX hub op 44%: de diesel werd
+254 × 44% = € 111,76, met de 83,00 Maasvlakte apart tegen de standaard,
+in plaats van (254 + 83) × 44% = € 148,28. Een terminaltoeslag hoort bij een
+rit en krijgt nu het percentage van die rit: van de rit die exclusief die
+toeslag geprijsd is, anders van de eerste rit, die van de terminal vertrekt.
+Alleen zonder rit valt hij terug op de standaard. Met één percentage voor alle
+ritten verandert er niets.
+
 ## 9.30.0
 
 **Een aantal bij elk optioneel document.** De optionele documenten en

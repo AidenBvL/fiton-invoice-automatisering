@@ -1686,7 +1686,7 @@
         // 6. Optional charges, driven by each client's own options list. Each
         //    one has a count: a T1 terminal -> keurpunt -> Rhenus -> bestemming
         //    is two T1 documents after the first, not one.
-        let optionalFuelBase = 0;
+        const optionalFuel = [];   // { key, amount }: terminal surcharges that carry fuel
         (cfg.options || []).forEach(opt => {
             const count = optionCount(o.options, opt.key);
             if (!count) return;
@@ -1695,7 +1695,7 @@
                         : (opt.ledger === LEDGER.transit || opt.ledger === LEDGER.docs) ? G.docs
                         : G.surch;
             push(opt.ledger, opt.desc, qty, opt.price, group);
-            if (opt.fuelBase) optionalFuelBase += opt.price * qty;   // terminal surcharge counts towards fuel
+            if (opt.fuelBase) optionalFuel.push({ key: opt.key, amount: opt.price * qty });   // terminal surcharge counts towards fuel
         });
 
         // 7. Peak surcharges (standard rates, identical for every client)
@@ -1713,18 +1713,29 @@
             if (!fuelGroups.has(key)) fuelGroups.set(key, { input: String(input || '').trim(), base: 0, routes: [] });
             const g = fuelGroups.get(key);
             g.base += base;
-            if (route) g.routes.push(route);
+            if (route && !g.routes.includes(route)) g.routes.push(route);
         };
-        const fixedFuelBase = (cfg.fixedFuelBase * ctr) + optionalFuelBase;
-        if (fixedFuelBase > 0) addFuel(o.dieselInput, fixedFuelBase, null);
         const destTable = DESTINATIONS[templateType] || [];
+        const rides = [];   // the rides whose rate carries fuel, in the order chosen
         (o.destChoices || []).forEach(dest => {
             const d = destTable.find(x => x.id === dest.id);
             if (!d) { log('Unknown destination id, skipped', dest); return; }
             push(LEDGER.trucking, d.desc, ctr, d.price, G.transport);
-            if (!d.fuelIncluded) addFuel(routeDiesel(dest, o), d.price * ctr, d.label);
+            if (!d.fuelIncluded) rides.push({ d, input: routeDiesel(dest, o) });
             if (dest.maut > 0) push(LEDGER.toll, `Maut (DE) Rotterdam -> ${d.label}`, 1.000, dest.maut, G.transport);
             if (dest.toll > 0) push(LEDGER.toll, `Toll (NL) Rotterdam -> ${d.label}`, 1.000, dest.toll, G.transport);
+        });
+        rides.forEach(r => addFuel(r.input, r.d.price * ctr, r.d.label));
+        /* A terminal surcharge (Maasvlakte) is part of a ride, so it takes that
+           ride's diesel percentage: 254 + 83 at 44%, not 254 at 44% and 83 at
+           the default. It goes with the ride that is quoted excluding it, else
+           with the first ride - the one that leaves the terminal. Only without
+           a ride does it fall back to the default percentage. */
+        const rideFor = key => rides.find(r => (r.d.requires || []).includes(key)) || rides[0] || null;
+        const fixedFuel = [{ key: '', amount: cfg.fixedFuelBase * ctr }, ...optionalFuel].filter(f => f.amount > 0);
+        fixedFuel.forEach(f => {
+            const ride = rideFor(f.key);
+            addFuel(ride ? ride.input : o.dieselInput, f.amount, ride ? ride.d.label : null);
         });
 
         // 10. NVWA - always clamped between the minimum and maximum fee
