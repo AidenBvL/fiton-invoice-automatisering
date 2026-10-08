@@ -1,5 +1,18 @@
 # Wat er veranderd is
 
+## 9.31.1
+
+**Overgenomen rederijkosten houden hun eigen omschrijving.** De regels die uit
+de inkoop werden overgenomen, kregen de naam van hun grootboek: *Admin Fee
+Destination*, *Equipment Mainenance Fee*. Nu krijgen ze de omschrijving van de
+kostenregel zelf, zonder de verwijzingen ervoor. *7556325038 MMAU1266089 -
+Terminal Handling Service* wordt *Terminal Handling Service*, en
+*NLIC0125218 - Container maintenance Fee at destination* wordt *Container
+maintenance Fee at destination*. Factuurnummers, containernummers en
+zendingnummers gaan eraf. Een gedeelde regel houdt zijn *(1/2)*. Staat er op de
+kostenregel niets dan nummers, dan valt de omschrijving terug op het
+grootboek, zoals eerst. Het grootboek zelf blijft dat van de kostenregel.
+
 ## 9.31.0
 
 **Template voor J.A. Ter Maten B.V.** Volgens de offerte van 26-01-2026,

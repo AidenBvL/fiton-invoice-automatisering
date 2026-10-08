@@ -3485,12 +3485,34 @@
     /* A carrier cost line as a revenue line: same ledger, same amount, and a
        description in the client's language - the outlay row's wording where
        one exists for that ledger, the ledger's own name otherwise. */
+    /* The charge a cost line describes, without the references in front of
+       it. Cost lines are booked as "7556325038 MMAU1266089 - Terminal Handling
+       Service" or "NLIC0125218 - Container maintenance fee": the invoice
+       number, container and shipment id mean nothing to the client. A part
+       made of references only is dropped, and so are references in front of
+       the words. '' when nothing but references is left. */
+    const REF_TOKEN = /^(?=.*\d)[A-Z0-9][A-Z0-9\/._-]{4,}$/i;
+    function chargeFromCostDesc(desc) {
+        const parts = String(desc || '')
+            .replace(new RegExp(CONTAINER_RE.source, 'g'), ' ')
+            .split(/\s+[-–]\s+/)
+            .map(part => {
+                const words = part.trim().split(/\s+/).filter(Boolean);
+                while (words.length && REF_TOKEN.test(words[0])) words.shift();
+                return words.join(' ').replace(/^[\s:;,·|/-]+|[\s:;,·|/-]+$/g, '');
+            })
+            .filter(part => /[a-z]{2}/i.test(part));
+        return parts.join(' - ');
+    }
+
     function carrierCostAsRevenue(line, nl) {
         const ledger = line.ledger || LEDGER.extraCosts;
         const outlay = OUTLAY_ITEMS.find(oi => oi.ledger.id === ledger.id && oi.key !== 'extraSurcharges' && oi.key !== 'customsCharges');
-        const desc = outlay ? (nl ? outlay.nl : outlay.en)
+        // The cost line's own wording first; the ledger only when it has none.
+        const desc = chargeFromCostDesc(line.desc)
+            || (outlay ? (nl ? outlay.nl : outlay.en)
             : line.ledger ? ledger.name.replace(/\s*\((common|duty\/vat)\)\s*$/i, '').replace(/\s{2,}/g, ' ').trim()
-            : (line.desc || (nl ? 'Extra toeslagen rederij' : 'Extra carrier surcharges'));
+            : (nl ? 'Extra toeslagen rederij' : 'Extra carrier surcharges'));
         return { ledgerId: ledger.id, ledgerName: ledger.name, desc, qty: line.qty || 1, price: line.price,
                  carrier: line.carrier ? line.carrier.name : '', guessedLedger: !line.ledger };
     }
